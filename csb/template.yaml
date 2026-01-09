@@ -70,13 +70,15 @@ provision:
       mkdir -p ~/.npm-global
       npm config set prefix ~/.npm-global
       export PATH="$HOME/.npm-global/bin:$PATH"
+      # Add to both .bashrc (interactive) and .profile (login shells)
       echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+      echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
 
       echo "CSB_PROGRESS:Installing Claude Code CLI"
       npm install -g @anthropic-ai/claude-code
 
       echo "CSB_PROGRESS:Installing beads"
-      npm install -g @anthropic-ai/beads || true
+      npm install -g @beads/bd || true
 
       # Remove any old settings.json (we use --dangerously-skip-permissions instead)
       rm -f ~/.claude/settings.json
