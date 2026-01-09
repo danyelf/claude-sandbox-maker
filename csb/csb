@@ -523,7 +523,7 @@ cmd_status() {
     if [[ -f "${CSB_FILE}" ]]; then
         echo ""
         echo "Config:"
-        cat "${CSB_FILE}" | tail -n +2
+        tail -n +2 "${CSB_FILE}"
     fi
 }
 
