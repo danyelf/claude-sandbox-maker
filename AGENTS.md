@@ -2,6 +2,8 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+# Bead Instructions
+
 ## Quick Reference
 
 ```bash
@@ -31,8 +33,8 @@ bd sync               # Sync with git
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
+   /
+   **CRITICAL RULES:**
 
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
