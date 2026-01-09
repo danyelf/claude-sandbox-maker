@@ -11,6 +11,69 @@ TEMPLATE_FILE="${CSB_DIR}/template.yaml"
 NETWORK_RULES="${CSB_DIR}/network-rules.sh"
 VERBOSE="${CSB_VERBOSE:-false}"
 
+# Timing support
+declare -A STEP_TIMES
+declare -A STEP_START_TIMES
+TIMING_ENABLED="${CSB_TIMING:-true}"  # On by default now
+
+# Record step completion time
+record_step() {
+    local step="$1"
+    local duration="$2"
+    STEP_TIMES["${step}"]="${duration}"
+}
+
+# Format seconds as human-readable
+format_duration() {
+    local secs="$1"
+    if (( $(echo "$secs < 60" | bc -l) )); then
+        printf "%.1fs" "$secs"
+    else
+        local mins=$(echo "$secs / 60" | bc)
+        local remaining=$(echo "$secs - ($mins * 60)" | bc)
+        printf "%dm%.0fs" "$mins" "$remaining"
+    fi
+}
+
+# Print timing summary at end
+print_timing_summary() {
+    if [[ "${TIMING_ENABLED}" != "true" ]]; then
+        return
+    fi
+
+    local has_times=false
+    for step in check_lima create_vm start_vm create_session; do
+        if [[ -n "${STEP_TIMES["${step}"]}" ]]; then
+            has_times=true
+            break
+        fi
+    done
+
+    if [[ "${has_times}" != "true" ]]; then
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}[csb]${NC} Timing:"
+    local total=0
+
+    for step in check_lima create_vm start_vm create_session; do
+        if [[ -n "${STEP_TIMES["${step}"]}" ]]; then
+            local duration="${STEP_TIMES["${step}"]}"
+            total=$(echo "$total + $duration" | bc)
+            case "${step}" in
+                check_lima)     printf "     %-18s %s\n" "Lima check:" "$(format_duration $duration)" ;;
+                create_vm)      printf "     %-18s %s\n" "VM creation:" "$(format_duration $duration)" ;;
+                start_vm)       printf "     %-18s %s\n" "VM start:" "$(format_duration $duration)" ;;
+                create_session) printf "     %-18s %s\n" "Session:" "$(format_duration $duration)" ;;
+            esac
+        fi
+    done
+
+    echo "     ──────────────────────"
+    printf "     %-18s %s\n" "Total:" "$(format_duration $total)"
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,18 +91,32 @@ dim() { echo -e "${GRAY}     $1${NC}"; }
 
 # Spinner for long-running operations
 spinner_pid=""
+spinner_start_time=""
 start_spinner() {
     local msg="$1"
+    spinner_start_time=$(date +%s)
+
     if [[ "${VERBOSE}" == "true" ]]; then
         info "$msg"
         return
     fi
 
+    # Export for subshell
+    export __CSB_SPINNER_START="${spinner_start_time}"
+    export __CSB_SPINNER_MSG="$msg"
+
     (
         local chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         local i=0
+        local start="${__CSB_SPINNER_START}"
+        local spinner_msg="${__CSB_SPINNER_MSG}"
+        local blue='\033[0;34m'
+        local gray='\033[0;90m'
+        local nc='\033[0m'
         while true; do
-            printf "\r${BLUE}[csb]${NC} %s %s" "$msg" "${chars:$i:1}"
+            local now=$(date +%s)
+            local elapsed=$((now - start))
+            printf "\r${blue}[csb]${nc} %s %s ${gray}%ds${nc}  " "${spinner_msg}" "${chars:$i:1}" "$elapsed"
             i=$(( (i + 1) % 10 ))
             sleep 0.1
         done
@@ -51,6 +128,13 @@ start_spinner() {
 stop_spinner() {
     local success="${1:-true}"
     local msg="${2:-}"
+    local step_name="${3:-}"  # Optional step name for recording
+
+    local elapsed=0
+    if [[ -n "$spinner_start_time" ]]; then
+        local now=$(date +%s)
+        elapsed=$((now - spinner_start_time))
+    fi
 
     if [[ -n "$spinner_pid" ]]; then
         kill $spinner_pid 2>/dev/null
@@ -59,28 +143,46 @@ stop_spinner() {
         printf "\r\033[K"  # Clear line
     fi
 
+    # Record timing if step name provided
+    if [[ -n "$step_name" && "$elapsed" -gt 0 ]]; then
+        record_step "$step_name" "$elapsed"
+    fi
+
     if [[ -n "$msg" ]]; then
         if [[ "$success" == "true" ]]; then
-            success "$msg"
+            if [[ "$elapsed" -gt 0 ]]; then
+                success "$msg ${GRAY}($(format_duration $elapsed))${NC}"
+            else
+                success "$msg"
+            fi
         else
             error "$msg"
         fi
     fi
+
+    spinner_start_time=""
 }
 
 # Run command with spinner (suppresses output unless verbose or error)
+# Usage: run_with_spinner "message" "success_msg" [step_name] command args...
 run_with_spinner() {
     local msg="$1"
     shift
     local success_msg="${1:-}"
     shift
+    local step_name=""
+    # Check if next arg looks like a step name (no spaces, short)
+    if [[ "$1" =~ ^[a-z_]+$ && ${#1} -lt 20 ]]; then
+        step_name="$1"
+        shift
+    fi
 
     start_spinner "$msg"
 
     local output
     local exit_code=0
     if [[ "${VERBOSE}" == "true" ]]; then
-        stop_spinner true ""
+        stop_spinner true "" "$step_name"
         info "$msg"
         "$@" || exit_code=$?
     else
@@ -88,10 +190,10 @@ run_with_spinner() {
     fi
 
     if [[ $exit_code -eq 0 ]]; then
-        stop_spinner true "${success_msg:-$msg... done}"
+        stop_spinner true "${success_msg:-$msg... done}" "$step_name"
         return 0
     else
-        stop_spinner false "$msg... failed"
+        stop_spinner false "$msg... failed" "$step_name"
         if [[ -n "$output" ]]; then
             echo "$output" >&2
         fi
@@ -195,7 +297,7 @@ create_vm() {
     rm -f "${tmp_template}.bak"
 
     # Create the VM with progress feedback (--tty=false skips interactive prompts)
-    run_with_spinner "Downloading VM image" "VM image ready" \
+    run_with_spinner "Downloading VM image" "VM image ready" create_vm \
         limactl create --tty=false --name="${vm_name}" "${tmp_template}"
     rm -f "${tmp_template}"
 
@@ -221,6 +323,8 @@ start_vm() {
     dim "First start provisions the VM (this takes a few minutes)..."
     echo ""
 
+    local start_time=$(date +%s)
+
     if [[ "${VERBOSE}" == "true" ]]; then
         # Verbose mode: show all output
         limactl start --progress "${vm_name}"
@@ -232,6 +336,7 @@ start_vm() {
         local i=0
         local last_stage=""
         local current_stage="Booting VM"
+        local stage_start=$start_time
 
         # Start limactl in background (without --progress to avoid noise)
         limactl start "${vm_name}" > "${tmpfile}" 2>&1 &
@@ -246,16 +351,20 @@ start_vm() {
                 new_stage=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_PROGRESS:' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | sed 's/.*CSB_PROGRESS://' || true)
             fi
 
+            local now=$(date +%s)
+            local stage_elapsed=$((now - stage_start))
+
             if [[ -n "${new_stage}" && "${new_stage}" != "${last_stage}" ]]; then
-                # Clear current line, show completed stage
+                # Clear current line, show completed stage with timing
                 printf "\r\033[K"
-                success "✓ ${current_stage}"
+                success "✓ ${current_stage} ${GRAY}(${stage_elapsed}s)${NC}"
                 current_stage="${new_stage}"
                 last_stage="${new_stage}"
+                stage_start=$now
             fi
 
-            # Show spinner with current stage
-            printf "\r${BLUE}[csb]${NC} %s %s" "${current_stage}" "${chars:$i:1}"
+            # Show spinner with current stage and elapsed time
+            printf "\r${BLUE}[csb]${NC} %s %s ${GRAY}%ds${NC}  " "${current_stage}" "${chars:$i:1}" "$stage_elapsed"
             i=$(( (i + 1) % 10 ))
             sleep 1
         done
@@ -266,10 +375,15 @@ start_vm() {
         # Clear spinner line
         printf "\r\033[K"
 
+        local end_time=$(date +%s)
+        local total_elapsed=$((end_time - start_time))
+        local stage_elapsed=$((end_time - stage_start))
+
         if [[ $exit_code -eq 0 ]]; then
-            success "✓ ${current_stage}"
+            success "✓ ${current_stage} ${GRAY}(${stage_elapsed}s)${NC}"
             echo ""
-            success "VM started"
+            success "VM started ${GRAY}(total: $(format_duration $total_elapsed))${NC}"
+            record_step "start_vm" "$total_elapsed"
         else
             error "Failed to start VM"
             echo ""
@@ -293,7 +407,7 @@ stop_vm() {
         return 0
     fi
 
-    run_with_spinner "Stopping VM" "VM stopped" \
+    run_with_spinner "Stopping VM" "VM stopped" stop_vm \
         limactl stop "${vm_name}"
 }
 
@@ -328,12 +442,21 @@ cmd_start() {
     start_vm "${vm_name}"
 
     # Create new tmux session with Claude
+    local session_start=$(date +%s)
     local session_name=$(get_next_session "${vm_name}")
     info "Creating session: ${session_name}"
 
     limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude" 2>/dev/null || true
 
+    local session_end=$(date +%s)
+    local session_elapsed=$((session_end - session_start))
+    record_step "create_session" "$session_elapsed"
+
+    # Print timing summary before attaching (since attach blocks)
+    print_timing_summary
+
     # Attach to the session
+    echo ""
     info "Attaching to ${session_name}..."
     limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session_name}"
 }
@@ -535,6 +658,7 @@ Examples:
 Environment:
   ANTHROPIC_API_KEY   API key for Claude (passed to VM)
   CSB_VERBOSE=true    Enable verbose output
+  CSB_TIMING=false    Disable timing display (on by default)
 
 EOF
 }
