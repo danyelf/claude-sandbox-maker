@@ -380,7 +380,7 @@ cmd_attach() {
 
     if [[ -z "${session}" ]]; then
         # Attach to most recent session
-        local latest=$(limactl shell "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' | sort -t'-' -k2 -n | tail -1)
+        local latest=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' | sort -t'-' -k2 -n | tail -1)
         if [[ -z "${latest}" ]]; then
             error "No Claude sessions found. Run 'csb start' to create one."
             exit 1
@@ -391,7 +391,7 @@ cmd_attach() {
     fi
 
     info "Attaching to ${session}..."
-    limactl shell "${vm_name}" -- tmux attach-session -t "${session}"
+    limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session}"
 }
 
 # Command: list
