@@ -55,6 +55,7 @@ provision:
         npm \
         jq \
         iptables \
+        ipset \
         dnsutils
 
       # Clean up apt cache
@@ -114,7 +115,8 @@ provision:
       echo "CSB_PROGRESS:Applying network restrictions"
 
       # Network allowlist for Claude Sandbox
-      # Blocks all outbound traffic except approved domains
+      # Uses ipset for efficient IP matching with periodic refresh
+      # to handle CDN IP rotation
 
       ALLOWED_DOMAINS=(
         # Package managers
@@ -157,26 +159,39 @@ provision:
         "cloud.debian.org"
       )
 
-      # Resolve domain to IPs and add iptables rules
-      resolve_and_allow() {
+      # Export domain list for refresh script
+      printf '%s\n' "${ALLOWED_DOMAINS[@]}" > /etc/csb-allowed-domains.txt
+
+      # Create ipsets for IPv4 and IPv6
+      ipset create csb-allowed-v4 hash:ip family inet hashsize 1024 maxelem 65536
+      ipset create csb-allowed-v6 hash:ip family inet6 hashsize 1024 maxelem 65536
+
+      # Resolve domains and populate ipsets
+      resolve_and_add() {
         local domain="$1"
         local ips
 
-        # Resolve domain to IP addresses
+        # IPv4 addresses
         ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-        ips+=$'\n'$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
-
         for ip in $ips; do
-          if [[ -n "$ip" && "$ip" != *";"* ]]; then
-            iptables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
-            ip6tables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
-          fi
+          [[ -n "$ip" && "$ip" != *";"* ]] && ipset add csb-allowed-v4 "$ip" 2>/dev/null || true
+        done
+
+        # IPv6 addresses
+        ips=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
+        for ip in $ips; do
+          [[ -n "$ip" && "$ip" != *";"* ]] && ipset add csb-allowed-v6 "$ip" 2>/dev/null || true
         done
       }
 
-      echo "Configuring network allowlist..."
+      echo "Configuring network allowlist with ipset..."
 
-      # Flush existing rules
+      for domain in "${ALLOWED_DOMAINS[@]}"; do
+        echo "  Resolving: $domain"
+        resolve_and_add "$domain"
+      done
+
+      # Flush existing OUTPUT rules
       iptables -F OUTPUT 2>/dev/null || true
       ip6tables -F OUTPUT 2>/dev/null || true
 
@@ -202,45 +217,94 @@ provision:
       iptables -A OUTPUT -p udp --dport 123 -j ACCEPT
       ip6tables -A OUTPUT -p udp --dport 123 -j ACCEPT
 
-      # Resolve and allow each domain
-      for domain in "${ALLOWED_DOMAINS[@]}"; do
-        echo "  Allowing: $domain"
-        resolve_and_allow "$domain"
-      done
+      # Allow traffic to IPs in our ipsets
+      iptables -A OUTPUT -m set --match-set csb-allowed-v4 dst -j ACCEPT
+      ip6tables -A OUTPUT -m set --match-set csb-allowed-v6 dst -j ACCEPT
 
       # Drop everything else
       iptables -A OUTPUT -j DROP
       ip6tables -A OUTPUT -j DROP
 
-      echo "Network allowlist configured."
+      echo "Network allowlist configured with ipset."
 
-      # Save rules to persist across reboots
-      if command -v iptables-save &> /dev/null; then
-        iptables-save > /etc/iptables.rules 2>/dev/null || true
-        ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
+      # Save ipsets and iptables rules
+      ipset save > /etc/ipset.rules
+      iptables-save > /etc/iptables.rules
+      ip6tables-save > /etc/ip6tables.rules
 
-        cat > /etc/systemd/system/iptables-restore.service << 'EOFSERVICE'
+      # Create refresh script for periodic IP updates
+      cat > /usr/local/bin/csb-network-refresh << 'EOFREFRESH'
+      #!/bin/bash
+      # Refresh IP addresses for allowed domains (handles CDN IP rotation)
+      set -e
+      DOMAIN_FILE="/etc/csb-allowed-domains.txt"
+      [[ -f "$DOMAIN_FILE" ]] || exit 1
+
+      added=0
+      while IFS= read -r domain || [[ -n "$domain" ]]; do
+        [[ -z "$domain" || "$domain" =~ ^# ]] && continue
+        for ip in $(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true); do
+          [[ -n "$ip" && "$ip" != *";"* ]] && ipset add csb-allowed-v4 "$ip" 2>/dev/null && ((added++)) || true
+        done
+        for ip in $(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true); do
+          [[ -n "$ip" && "$ip" != *";"* ]] && ipset add csb-allowed-v6 "$ip" 2>/dev/null && ((added++)) || true
+        done
+      done < "$DOMAIN_FILE"
+      ipset save > /etc/ipset.rules 2>/dev/null || true
+      [[ $added -gt 0 ]] && logger -t csb-network-refresh "Added $added new IPs"
+      EOFREFRESH
+      chmod +x /usr/local/bin/csb-network-refresh
+
+      # Create systemd service for IP refresh
+      cat > /etc/systemd/system/csb-network-refresh.service << 'EOFSERVICE'
       [Unit]
-      Description=Restore iptables rules
+      Description=Refresh CSB network allowlist IPs
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/csb-network-refresh
+      EOFSERVICE
+
+      # Create systemd timer (runs every 5 minutes)
+      cat > /etc/systemd/system/csb-network-refresh.timer << 'EOFTIMER'
+      [Unit]
+      Description=Periodic refresh of CSB network allowlist IPs
+
+      [Timer]
+      OnBootSec=1min
+      OnUnitActiveSec=5min
+      AccuracySec=1min
+
+      [Install]
+      WantedBy=timers.target
+      EOFTIMER
+
+      # Create restore service for reboot persistence
+      cat > /etc/systemd/system/csb-network-restore.service << 'EOFRESTORE'
+      [Unit]
+      Description=Restore CSB network rules (ipset + iptables)
       Before=network-pre.target
       Wants=network-pre.target
 
       [Service]
       Type=oneshot
+      ExecStart=/bin/sh -c 'ipset restore < /etc/ipset.rules'
       ExecStart=/sbin/iptables-restore /etc/iptables.rules
       ExecStart=/sbin/ip6tables-restore /etc/ip6tables.rules
       RemainAfterExit=yes
 
       [Install]
       WantedBy=multi-user.target
-      EOFSERVICE
+      EOFRESTORE
 
-        systemctl daemon-reload 2>/dev/null || true
-        systemctl enable iptables-restore.service 2>/dev/null || true
-      fi
+      systemctl daemon-reload
+      systemctl enable csb-network-restore.service
+      systemctl enable --now csb-network-refresh.timer
 
       echo "CSB_PROGRESS:Setup complete"
-      echo "Network rules configured and will persist across reboots."
+      echo "Network rules configured. IPs refresh every 5 minutes."
 
 # Environment variables
 env:
