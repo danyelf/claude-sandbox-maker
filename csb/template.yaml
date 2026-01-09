@@ -78,7 +78,9 @@ provision:
       npm install -g @anthropic-ai/claude-code
 
       echo "CSB_PROGRESS:Installing beads CLI"
-      npm install -g @beads/bd || true
+      if ! npm install -g @beads/bd; then
+        echo "CSB_WARN:beads CLI install failed (optional - you can install later with: npm install -g @beads/bd)"
+      fi
 
       # Remove any old settings.json (we use --dangerously-skip-permissions instead)
       rm -f ~/.claude/settings.json

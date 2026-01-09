@@ -367,6 +367,16 @@ start_vm() {
             success "✓ ${current_stage} ${GRAY}(${stage_duration})${NC}"
             echo ""
             success "VM started ${GRAY}(total: ${total_duration})${NC}"
+
+            # Check for any warnings from provisioning
+            local warnings
+            warnings=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_WARN:' /var/log/cloud-init-output.log 2>/dev/null | sed 's/.*CSB_WARN://' || true)
+            if [[ -n "${warnings}" ]]; then
+                echo ""
+                while IFS= read -r warning_msg; do
+                    warn "⚠ ${warning_msg}"
+                done <<< "${warnings}"
+            fi
         else
             error "Failed to start VM after ${total_duration}"
             echo ""
