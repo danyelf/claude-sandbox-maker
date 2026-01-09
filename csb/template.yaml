@@ -70,7 +70,7 @@ provision:
       npm install -g @anthropic-ai/claude-code
 
       echo "CSB_PROGRESS:Installing beads"
-      npm install -g @anthropic-ai/beads 2>/dev/null || true
+      npm install -g @anthropic-ai/beads || true
 
       echo "CSB_PROGRESS:Configuring Claude (YOLO mode)"
       mkdir -p ~/.claude
