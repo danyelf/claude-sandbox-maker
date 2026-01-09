@@ -8,7 +8,6 @@ VERSION="0.1.0"
 CSB_DIR="${HOME}/.csb"
 CSB_FILE=".csb"
 TEMPLATE_FILE="${CSB_DIR}/template.yaml"
-NETWORK_RULES="${CSB_DIR}/network-rules.sh"
 VERBOSE="${CSB_VERBOSE:-false}"
 
 # Colors for output
@@ -250,7 +249,6 @@ create_vm() {
         local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         if [[ -f "${script_dir}/template.yaml" ]]; then
             cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
-            cp "${script_dir}/network-rules.sh" "${NETWORK_RULES}"
         else
             error "Template not found. Please reinstall csb."
             exit 1
