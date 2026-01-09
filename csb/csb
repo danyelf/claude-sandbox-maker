@@ -302,7 +302,7 @@ start_vm() {
 
     if [[ "${VERBOSE}" == "true" ]]; then
         # Verbose mode: show all output
-        limactl start --progress "${vm_name}"
+        limactl start --tty=false --progress "${vm_name}"
     else
         # Normal mode: show progress with spinner and timing
         local tmpfile=$(mktemp)
@@ -318,7 +318,7 @@ start_vm() {
         start_progress_spinner "${current_stage}"
 
         # Start limactl in background (without --progress to avoid noise)
-        limactl start "${vm_name}" > "${tmpfile}" 2>&1 &
+        limactl start --tty=false "${vm_name}" > "${tmpfile}" 2>&1 &
         local lima_pid=$!
         disown $lima_pid 2>/dev/null
 
