@@ -1,10 +1,6 @@
 #!/bin/bash
 # Network allowlist for Claude Sandbox
-# Uses ipset for efficient IP matching with periodic refresh
-#
-# This script sets up the initial firewall rules using ipset.
-# A systemd timer runs network-refresh.sh periodically to update IPs
-# as CDN endpoints rotate.
+# Blocks all outbound traffic except approved domains
 
 set -e
 
@@ -50,60 +46,27 @@ ALLOWED_DOMAINS=(
     "cloud.debian.org"
 )
 
-# Export domains for use by refresh script
-export_domains() {
-    printf '%s\n' "${ALLOWED_DOMAINS[@]}" > /etc/csb-allowed-domains.txt
-}
-
-# Create ipsets if they don't exist
-create_ipsets() {
-    # IPv4 set
-    if ! ipset list csb-allowed-v4 &>/dev/null; then
-        ipset create csb-allowed-v4 hash:ip family inet hashsize 1024 maxelem 65536
-    fi
-    # IPv6 set
-    if ! ipset list csb-allowed-v6 &>/dev/null; then
-        ipset create csb-allowed-v6 hash:ip family inet6 hashsize 1024 maxelem 65536
-    fi
-}
-
-# Resolve domain to IPs and add to ipset
-resolve_and_add() {
+# Resolve domain to IPs and add iptables rules
+resolve_and_allow() {
     local domain="$1"
     local ips
 
-    # Resolve IPv4 addresses
+    # Resolve domain to IP addresses
     ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-    for ip in $ips; do
-        if [[ -n "$ip" && "$ip" != *";"* ]]; then
-            ipset add csb-allowed-v4 "$ip" 2>/dev/null || true
-        fi
-    done
+    ips+=$'\n'$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
 
-    # Resolve IPv6 addresses
-    ips=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
     for ip in $ips; do
         if [[ -n "$ip" && "$ip" != *";"* ]]; then
-            ipset add csb-allowed-v6 "$ip" 2>/dev/null || true
+            # Allow outbound to this IP
+            iptables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+            ip6tables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
         fi
     done
 }
 
-echo "Configuring network allowlist with ipset..."
+echo "Configuring network allowlist..."
 
-# Export domain list for refresh script
-export_domains
-
-# Create ipsets
-create_ipsets
-
-# Populate ipsets with resolved IPs
-for domain in "${ALLOWED_DOMAINS[@]}"; do
-    echo "  Resolving: $domain"
-    resolve_and_add "$domain"
-done
-
-# Flush existing OUTPUT rules
+# Flush existing rules
 iptables -F OUTPUT 2>/dev/null || true
 ip6tables -F OUTPUT 2>/dev/null || true
 
@@ -129,19 +92,42 @@ ip6tables -A OUTPUT -p udp --dport 67:68 -j ACCEPT
 iptables -A OUTPUT -p udp --dport 123 -j ACCEPT
 ip6tables -A OUTPUT -p udp --dport 123 -j ACCEPT
 
-# Allow traffic to IPs in our ipsets
-iptables -A OUTPUT -m set --match-set csb-allowed-v4 dst -j ACCEPT
-ip6tables -A OUTPUT -m set --match-set csb-allowed-v6 dst -j ACCEPT
+# Resolve and allow each domain
+for domain in "${ALLOWED_DOMAINS[@]}"; do
+    echo "  Allowing: $domain"
+    resolve_and_allow "$domain"
+done
 
 # Drop everything else
 iptables -A OUTPUT -j DROP
 ip6tables -A OUTPUT -j DROP
 
-echo "Network allowlist configured with ipset."
+echo "Network allowlist configured. Only approved domains are accessible."
 
-# Save ipsets and rules to persist across reboots
-ipset save > /etc/ipset.rules 2>/dev/null || true
-iptables-save > /etc/iptables.rules 2>/dev/null || true
-ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
+# Save rules to persist across reboots
+if command -v iptables-save &> /dev/null; then
+    iptables-save > /etc/iptables.rules 2>/dev/null || true
+    ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
 
-echo "Done. IPs will be refreshed periodically by csb-network-refresh.timer"
+    # Create systemd service to restore rules on boot
+    cat > /etc/systemd/system/iptables-restore.service << 'EOF'
+[Unit]
+Description=Restore iptables rules
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/iptables.rules
+ExecStart=/sbin/ip6tables-restore /etc/ip6tables.rules
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable iptables-restore.service 2>/dev/null || true
+fi
+
+echo "Done."
