@@ -428,7 +428,10 @@ cmd_start() {
     local session_name=$(get_next_session "${vm_name}")
     info "Creating session: ${session_name}"
 
-    limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude" 2>/dev/null || true
+    if ! limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude"; then
+        error "Failed to create tmux session '${session_name}'"
+        exit 1
+    fi
 
     # Attach to the session
     info "Attaching to ${session_name}..."
