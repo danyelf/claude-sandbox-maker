@@ -1,0 +1,138 @@
+# Lima VM template for Claude Sandbox (csb)
+# This template creates a sandboxed environment for Claude Code development
+
+# Base image - Debian slim
+images:
+  - location: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2"
+    arch: "x86_64"
+  - location: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-arm64.qcow2"
+    arch: "aarch64"
+
+# VM resources (can be overridden via .csb config)
+cpus: 2
+memory: "2GiB"
+disk: "20GiB"
+
+# Mount workspace - this will be replaced at runtime with actual path
+mounts:
+  - location: "{{WORKSPACE_PATH}}"
+    mountPoint: "/workspace"
+    writable: true
+
+# SSH configuration
+ssh:
+  localPort: 0  # Auto-assign port
+  forwardAgent: true
+
+# Containerd disabled - we don't need containers
+containerd:
+  system: false
+  user: false
+
+# Provisioning scripts run on first boot
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+
+      # Update and install base packages
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        tmux \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        build-essential \
+        python3 \
+        python3-pip \
+        python3-venv \
+        nodejs \
+        npm \
+        jq \
+        iptables
+
+      # Clean up apt cache
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+
+      # Install Claude Code CLI
+      npm install -g @anthropic-ai/claude-code
+
+      # Install beads
+      npm install -g @anthropic-ai/beads || true
+
+      # Create Claude config directory
+      mkdir -p ~/.claude
+
+      # Configure YOLO mode (auto-accept all tool calls)
+      cat > ~/.claude/settings.json << 'EOF'
+      {
+        "permissions": {
+          "allow": [
+            "Bash(*)",
+            "Read(*)",
+            "Write(*)",
+            "Edit(*)",
+            "Glob(*)",
+            "Grep(*)",
+            "WebFetch(*)",
+            "WebSearch(*)",
+            "TodoWrite(*)",
+            "Task(*)",
+            "NotebookEdit(*)"
+          ],
+          "deny": []
+        }
+      }
+      EOF
+
+      # Set workspace as default directory
+      echo 'cd /workspace' >> ~/.bashrc
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+
+      # Apply network restrictions (script will be copied separately)
+      if [ -f /tmp/network-rules.sh ]; then
+        chmod +x /tmp/network-rules.sh
+        /tmp/network-rules.sh
+      fi
+
+# Copy network rules script before provisioning
+copyToHost: []
+
+# Environment variables
+env:
+  ANTHROPIC_API_KEY: "{{ANTHROPIC_API_KEY}}"
+
+# Message displayed after VM starts
+message: |
+  Claude Sandbox is ready!
+
+  Workspace mounted at: /workspace
+
+  To start Claude Code:
+    claude
+
+  To create a new tmux session:
+    tmux new -s claude
+
+# Probe configuration for health checks
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until command -v claude >/dev/null 2>&1; do sleep 3; done"; then
+        echo >&2 "claude is not installed yet"
+        exit 1
+      fi
+    hint: See "/var/log/cloud-init-output.log" in the guest
