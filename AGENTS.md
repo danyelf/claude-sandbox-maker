@@ -14,6 +14,50 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Worktree-Based Development
+
+Use git worktrees to isolate work on each issue:
+
+**Starting work on an issue:**
+
+```bash
+# From main branch, mark the issue as in-progress
+bd update <id> --status in_progress
+bd sync
+
+# Create a worktree for the issue
+git worktree add ../<project>-<id> -b <id>
+cd ../<project>-<id>
+```
+
+**While working:**
+- Do all work in the worktree only
+- Keep main clean for other tasks or reviews
+
+**Completing work:**
+
+```bash
+# In the worktree: commit your changes
+git add -A && git commit -m "Description of changes"
+
+# Rebase against main
+git fetch origin main
+git rebase origin/main
+
+# Switch to main and merge
+cd /path/to/main
+git merge <id> --ff-only
+
+# Clean up the worktree
+git worktree remove ../<project>-<id>
+git branch -d <id>
+
+# Close the issue and push
+bd close <id>
+bd sync
+git push
+```
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
@@ -33,8 +77,8 @@ bd sync               # Sync with git
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
-   /
-   **CRITICAL RULES:**
+
+**CRITICAL RULES:**
 
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
