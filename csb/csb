@@ -103,6 +103,11 @@ run_with_spinner() {
 # Cleanup spinner on exit
 trap 'stop_spinner false ""' EXIT
 
+# Escape string for use in sed replacement (handles |, &, \, newlines)
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[&\|]/\\&/g' -e 's/$/\\/' | tr -d '\n' | sed 's/\\$//'
+}
+
 # Check if Lima is installed
 check_lima() {
     if ! command -v limactl &> /dev/null; then
@@ -177,11 +182,13 @@ create_vm() {
 
     # Create temporary template with workspace substituted
     local tmp_template=$(mktemp)
-    sed "s|{{WORKSPACE_PATH}}|${workspace}|g" "${TEMPLATE_FILE}" > "${tmp_template}"
+    local escaped_workspace=$(escape_sed_replacement "${workspace}")
+    sed "s|{{WORKSPACE_PATH}}|${escaped_workspace}|g" "${TEMPLATE_FILE}" > "${tmp_template}"
 
     # Substitute API key if set
     if [[ -n "${ANTHROPIC_API_KEY}" ]]; then
-        sed -i.bak "s|{{ANTHROPIC_API_KEY}}|${ANTHROPIC_API_KEY}|g" "${tmp_template}"
+        local escaped_key=$(escape_sed_replacement "${ANTHROPIC_API_KEY}")
+        sed -i.bak "s|{{ANTHROPIC_API_KEY}}|${escaped_key}|g" "${tmp_template}"
     else
         sed -i.bak "s|{{ANTHROPIC_API_KEY}}||g" "${tmp_template}"
     fi
