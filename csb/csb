@@ -444,9 +444,11 @@ cmd_start() {
         exit 1
     fi
 
-    # Remove any stale settings.json that may have invalid permission syntax
+    # Remove any stale settings files that may have invalid permission syntax
     # (we use --dangerously-skip-permissions instead)
-    limactl shell --workdir / "${vm_name}" -- rm -f ~/.claude/settings.json
+    # Check both VM home (~/.claude) and workspace (/workspace/.claude)
+    limactl shell --workdir / "${vm_name}" -- rm -f ~/.claude/settings.json ~/.claude/settings.local.json
+    limactl shell --workdir / "${vm_name}" -- rm -f /workspace/.claude/settings.json /workspace/.claude/settings.local.json
 
     # Send claude command to the session (skip permissions since VM is sandboxed)
     limactl shell --workdir / "${vm_name}" -- tmux send-keys -t "${session_name}" "claude --dangerously-skip-permissions" Enter
