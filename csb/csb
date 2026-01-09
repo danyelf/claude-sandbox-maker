@@ -194,9 +194,9 @@ create_vm() {
     fi
     rm -f "${tmp_template}.bak"
 
-    # Create the VM with progress feedback
+    # Create the VM with progress feedback (--tty=false skips interactive prompts)
     run_with_spinner "Downloading VM image" "VM image ready" \
-        limactl create --name="${vm_name}" "${tmp_template}"
+        limactl create --tty=false --name="${vm_name}" "${tmp_template}"
     rm -f "${tmp_template}"
 
     # Save config
@@ -242,8 +242,8 @@ start_vm() {
         while kill -0 $lima_pid 2>/dev/null; do
             # Try to get latest progress from VM's cloud-init log
             local new_stage=""
-            if limactl shell "${vm_name}" -- sudo test -f /var/log/cloud-init-output.log 2>/dev/null; then
-                new_stage=$(limactl shell "${vm_name}" -- sudo grep 'CSB_PROGRESS:' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | sed 's/.*CSB_PROGRESS://' || true)
+            if limactl shell --workdir / "${vm_name}" -- sudo test -f /var/log/cloud-init-output.log 2>/dev/null; then
+                new_stage=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_PROGRESS:' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | sed 's/.*CSB_PROGRESS://' || true)
             fi
 
             if [[ -n "${new_stage}" && "${new_stage}" != "${last_stage}" ]]; then
