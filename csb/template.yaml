@@ -77,63 +77,11 @@ provision:
       echo "CSB_PROGRESS:Installing Claude Code CLI"
       npm install -g @anthropic-ai/claude-code
 
-      echo "CSB_PROGRESS:Installing beads CLI"
+      echo "CSB_PROGRESS:Installing beads"
       npm install -g @beads/bd || true
 
       # Remove any old settings.json (we use --dangerously-skip-permissions instead)
       rm -f ~/.claude/settings.json
-
-      echo "CSB_PROGRESS:Installing Claude plugins (beads, superpowers)"
-      mkdir -p ~/.claude/plugins/{marketplaces,cache}
-
-      # Clone marketplace repos
-      git clone --depth 1 https://github.com/steveyegge/beads.git ~/.claude/plugins/marketplaces/beads-marketplace
-      git clone --depth 1 https://github.com/obra/superpowers-marketplace.git ~/.claude/plugins/marketplaces/superpowers-marketplace
-
-      # Clone plugin code to cache
-      git clone --depth 1 https://github.com/steveyegge/beads.git ~/.claude/plugins/cache/beads-marketplace/beads/latest
-      git clone --depth 1 https://github.com/obra/superpowers.git ~/.claude/plugins/cache/superpowers-marketplace/superpowers/latest
-
-      # Configure known marketplaces
-      cat > ~/.claude/plugins/known_marketplaces.json << 'EOFMARKETS'
-      {
-        "beads-marketplace": {
-          "source": { "source": "github", "repo": "steveyegge/beads" },
-          "installLocation": "$HOME/.claude/plugins/marketplaces/beads-marketplace"
-        },
-        "superpowers-marketplace": {
-          "source": { "source": "github", "repo": "obra/superpowers-marketplace" },
-          "installLocation": "$HOME/.claude/plugins/marketplaces/superpowers-marketplace"
-        }
-      }
-      EOFMARKETS
-      # Fix $HOME in the JSON
-      sed -i "s|\$HOME|$HOME|g" ~/.claude/plugins/known_marketplaces.json
-
-      # Configure installed plugins
-      cat > ~/.claude/plugins/installed_plugins.json << 'EOFPLUGINS'
-      {
-        "version": 2,
-        "plugins": {
-          "beads@beads-marketplace": [{
-            "scope": "user",
-            "installPath": "$HOME/.claude/plugins/cache/beads-marketplace/beads/latest",
-            "version": "latest",
-            "installedAt": "2026-01-01T00:00:00.000Z",
-            "lastUpdated": "2026-01-01T00:00:00.000Z"
-          }],
-          "superpowers@superpowers-marketplace": [{
-            "scope": "user",
-            "installPath": "$HOME/.claude/plugins/cache/superpowers-marketplace/superpowers/latest",
-            "version": "latest",
-            "installedAt": "2026-01-01T00:00:00.000Z",
-            "lastUpdated": "2026-01-01T00:00:00.000Z"
-          }]
-        }
-      }
-      EOFPLUGINS
-      # Fix $HOME in the JSON
-      sed -i "s|\$HOME|$HOME|g" ~/.claude/plugins/installed_plugins.json
 
       # Set workspace as default directory
       echo 'cd /workspace' >> ~/.bashrc
