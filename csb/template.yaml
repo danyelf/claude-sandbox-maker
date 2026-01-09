@@ -85,38 +85,19 @@ provision:
       # Remove any old settings.json (we use --dangerously-skip-permissions instead)
       rm -f ~/.claude/settings.json
 
-      # Create plugin setup script
-      cat > ~/.csb-setup-plugins << 'EOFSETUP'
-      #!/bin/bash
-      echo "Setting up Claude plugins..."
-      echo ""
-      echo "Run these commands in Claude:"
-      echo ""
-      echo "  /plugin marketplace add steveyegge/beads"
-      echo "  /plugin marketplace add obra/superpowers-marketplace"
-      echo "  /plugin install beads@beads-marketplace"
-      echo "  /plugin install superpowers@superpowers-marketplace"
-      echo ""
-      echo "Or copy-paste this block:"
-      echo ""
-      cat << 'CMDS'
-      /plugin marketplace add steveyegge/beads
-      /plugin marketplace add obra/superpowers-marketplace
-      /plugin install beads@beads-marketplace
-      /plugin install superpowers@superpowers-marketplace
-      CMDS
-      EOFSETUP
-      chmod +x ~/.csb-setup-plugins
-
-      # Show setup reminder on first login
+      # Show setup reminder on first login with plugin commands inline
       cat >> ~/.bashrc << 'EOFRC'
 
       # CSB first-run plugin setup reminder
       if [ ! -f ~/.csb-plugins-configured ]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Run ~/.csb-setup-plugins for plugin install commands"
-        echo "  (beads + superpowers)"
+        echo "  Install plugins (paste in Claude):"
+        echo ""
+        echo "  /plugin marketplace add steveyegge/beads"
+        echo "  /plugin marketplace add obra/superpowers-marketplace"
+        echo "  /plugin install beads@beads-marketplace"
+        echo "  /plugin install superpowers@superpowers-marketplace"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
       fi
