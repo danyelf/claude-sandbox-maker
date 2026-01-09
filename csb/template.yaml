@@ -66,6 +66,12 @@ provision:
       #!/bin/bash
       set -eux -o pipefail
 
+      # Configure npm to use user-writable directory for global packages
+      mkdir -p ~/.npm-global
+      npm config set prefix ~/.npm-global
+      export PATH="$HOME/.npm-global/bin:$PATH"
+      echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+
       echo "CSB_PROGRESS:Installing Claude Code CLI"
       npm install -g @anthropic-ai/claude-code
 
@@ -257,7 +263,8 @@ probes:
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 30s bash -c "until command -v claude >/dev/null 2>&1; do sleep 3; done"; then
+      # Check for claude in user's npm-global directory
+      if ! timeout 30s bash -c "until [ -x \$HOME/.npm-global/bin/claude ]; do sleep 3; done"; then
         echo >&2 "claude is not installed yet"
         exit 1
       fi
