@@ -30,14 +30,17 @@ containerd:
   user: false
 
 # Provisioning scripts run on first boot
+# Each script emits CSB_PROGRESS markers for status display
 provision:
   - mode: system
     script: |
       #!/bin/bash
       set -eux -o pipefail
 
-      # Update and install base packages
+      echo "CSB_PROGRESS:Updating package lists"
       apt-get update
+
+      echo "CSB_PROGRESS:Installing base packages (git, tmux, python3, nodejs)"
       apt-get install -y --no-install-recommends \
         tmux \
         git \
@@ -62,13 +65,13 @@ provision:
       #!/bin/bash
       set -eux -o pipefail
 
-      # Install Claude Code CLI
+      echo "CSB_PROGRESS:Installing Claude Code CLI"
       npm install -g @anthropic-ai/claude-code
 
-      # Install beads
+      echo "CSB_PROGRESS:Installing beads"
       npm install -g @anthropic-ai/beads || true
 
-      # Create Claude config directory
+      echo "CSB_PROGRESS:Configuring Claude (YOLO mode)"
       mkdir -p ~/.claude
 
       # Configure YOLO mode (auto-accept all tool calls)
@@ -101,11 +104,13 @@ provision:
       #!/bin/bash
       set -eux -o pipefail
 
+      echo "CSB_PROGRESS:Applying network restrictions"
       # Apply network restrictions (script will be copied separately)
       if [ -f /tmp/network-rules.sh ]; then
         chmod +x /tmp/network-rules.sh
         /tmp/network-rules.sh
       fi
+      echo "CSB_PROGRESS:Setup complete"
 
 # Copy network rules script before provisioning
 copyToHost: []
