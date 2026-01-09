@@ -8,10 +8,10 @@ images:
   - location: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-arm64.qcow2"
     arch: "aarch64"
 
-# VM resources (can be overridden via .csb config)
-cpus: 2
-memory: "2GiB"
-disk: "20GiB"
+# VM resources (can be overridden via limactl edit)
+cpus: 4
+memory: "4GiB"
+disk: "30GiB"
 
 # Mount workspace - this will be replaced at runtime with actual path
 mounts:
