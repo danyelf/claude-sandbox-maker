@@ -108,6 +108,18 @@ escape_sed_replacement() {
     printf '%s' "$1" | sed -e 's/[&\|]/\\&/g' -e 's/$/\\/' | tr -d '\n' | sed 's/\\$//'
 }
 
+# Format seconds as human-readable duration
+format_duration() {
+    local seconds=$1
+    if [[ $seconds -lt 60 ]]; then
+        echo "${seconds}s"
+    else
+        local mins=$((seconds / 60))
+        local secs=$((seconds % 60))
+        echo "${mins}m ${secs}s"
+    fi
+}
+
 # Check if Lima is installed
 check_lima() {
     if ! command -v limactl &> /dev/null; then
@@ -160,6 +172,7 @@ vm_status() {
 create_vm() {
     local vm_name="$1"
     local workspace="$(pwd)"
+    local create_start_time=$(date +%s)
 
     info "Creating VM: ${vm_name}"
     dim "This may take a few minutes on first run..."
@@ -202,8 +215,10 @@ create_vm() {
     # Save config
     save_config "${vm_name}"
 
+    local create_elapsed=$(($(date +%s) - create_start_time))
+    local create_duration=$(format_duration $create_elapsed)
     echo ""
-    success "VM created: ${vm_name}"
+    success "VM created: ${vm_name} ${GRAY}(${create_duration})${NC}"
 }
 
 # Start VM with progress display
@@ -225,13 +240,17 @@ start_vm() {
         # Verbose mode: show all output
         limactl start --progress "${vm_name}"
     else
-        # Normal mode: show progress with spinner
+        # Normal mode: show progress with spinner and timing
         local tmpfile=$(mktemp)
         local exit_code=0
         local chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         local i=0
         local last_stage=""
         local current_stage="Booting VM"
+
+        # Timing tracking
+        local start_time=$(date +%s)
+        local stage_start_time=$start_time
 
         # Start limactl in background (without --progress to avoid noise)
         limactl start "${vm_name}" > "${tmpfile}" 2>&1 &
@@ -247,15 +266,28 @@ start_vm() {
             fi
 
             if [[ -n "${new_stage}" && "${new_stage}" != "${last_stage}" ]]; then
-                # Clear current line, show completed stage
+                # Calculate elapsed time for completed stage
+                local now=$(date +%s)
+                local stage_elapsed=$((now - stage_start_time))
+                local stage_duration=$(format_duration $stage_elapsed)
+
+                # Clear current line, show completed stage with timing
                 printf "\r\033[K"
-                success "✓ ${current_stage}"
+                success "✓ ${current_stage} ${GRAY}(${stage_duration})${NC}"
+
+                # Start timing new stage
                 current_stage="${new_stage}"
                 last_stage="${new_stage}"
+                stage_start_time=$now
             fi
 
-            # Show spinner with current stage
-            printf "\r${BLUE}[csb]${NC} %s %s" "${current_stage}" "${chars:$i:1}"
+            # Calculate total elapsed time for spinner display
+            local now=$(date +%s)
+            local total_elapsed=$((now - start_time))
+            local elapsed_str=$(format_duration $total_elapsed)
+
+            # Show spinner with current stage and elapsed time
+            printf "\r${BLUE}[csb]${NC} %s %s ${GRAY}[%s]${NC}" "${current_stage}" "${chars:$i:1}" "${elapsed_str}"
             i=$(( (i + 1) % 10 ))
             sleep 1
         done
@@ -263,15 +295,22 @@ start_vm() {
         # Get exit code
         wait $lima_pid || exit_code=$?
 
+        # Calculate final timing
+        local end_time=$(date +%s)
+        local final_stage_elapsed=$((end_time - stage_start_time))
+        local total_elapsed=$((end_time - start_time))
+        local stage_duration=$(format_duration $final_stage_elapsed)
+        local total_duration=$(format_duration $total_elapsed)
+
         # Clear spinner line
         printf "\r\033[K"
 
         if [[ $exit_code -eq 0 ]]; then
-            success "✓ ${current_stage}"
+            success "✓ ${current_stage} ${GRAY}(${stage_duration})${NC}"
             echo ""
-            success "VM started"
+            success "VM started ${GRAY}(total: ${total_duration})${NC}"
         else
-            error "Failed to start VM"
+            error "Failed to start VM after ${total_duration}"
             echo ""
             # Show output for debugging
             cat "${tmpfile}" >&2
