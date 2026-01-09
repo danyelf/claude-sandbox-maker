@@ -78,31 +78,6 @@ provision:
       echo "CSB_PROGRESS:Installing beads"
       npm install -g @anthropic-ai/beads || true
 
-      echo "CSB_PROGRESS:Configuring Claude (YOLO mode)"
-      mkdir -p ~/.claude
-
-      # Configure YOLO mode (auto-accept all tool calls)
-      cat > ~/.claude/settings.json << 'EOF'
-      {
-        "permissions": {
-          "allow": [
-            "Bash(*)",
-            "Read(*)",
-            "Write(*)",
-            "Edit(*)",
-            "Glob(*)",
-            "Grep(*)",
-            "WebFetch(*)",
-            "WebSearch(*)",
-            "TodoWrite(*)",
-            "Task(*)",
-            "NotebookEdit(*)"
-          ],
-          "deny": []
-        }
-      }
-      EOF
-
       # Set workspace as default directory
       echo 'cd /workspace' >> ~/.bashrc
 
