@@ -300,7 +300,7 @@ stop_vm() {
 # Get next tmux session number
 get_next_session() {
     local vm_name="$1"
-    local sessions=$(limactl shell "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' | sort -t'-' -k2 -n | tail -1)
+    local sessions=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' | sort -t'-' -k2 -n | tail -1)
 
     if [[ -z "${sessions}" ]]; then
         echo "claude-1"
@@ -313,7 +313,7 @@ get_next_session() {
 # List tmux sessions
 list_sessions() {
     local vm_name="$1"
-    limactl shell "${vm_name}" -- tmux list-sessions 2>/dev/null || echo "No sessions"
+    limactl shell --workdir / "${vm_name}" -- tmux list-sessions 2>/dev/null || echo "No sessions"
 }
 
 # Command: start
@@ -331,11 +331,11 @@ cmd_start() {
     local session_name=$(get_next_session "${vm_name}")
     info "Creating session: ${session_name}"
 
-    limactl shell "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude" 2>/dev/null || true
+    limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude" 2>/dev/null || true
 
     # Attach to the session
     info "Attaching to ${session_name}..."
-    limactl shell "${vm_name}" -- tmux attach-session -t "${session_name}"
+    limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session_name}"
 }
 
 # Command: stop
