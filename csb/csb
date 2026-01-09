@@ -476,7 +476,7 @@ cmd_shell() {
     fi
 
     start_vm "${vm_name}"
-    limactl shell "${vm_name}" --workdir /workspace
+    limactl shell --workdir /workspace "${vm_name}"
 }
 
 # Command: attach
