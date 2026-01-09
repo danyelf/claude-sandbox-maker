@@ -175,7 +175,7 @@ create_vm() {
             cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
             cp "${script_dir}/network-rules.sh" "${NETWORK_RULES}"
         else
-            error "Template not found. Please run 'csb init' first or reinstall csb."
+            error "Template not found. Please reinstall csb."
             exit 1
         fi
     fi
@@ -481,28 +481,6 @@ cmd_destroy() {
     fi
 }
 
-# Command: init
-cmd_init() {
-    info "Initializing csb..."
-
-    mkdir -p "${CSB_DIR}"
-
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    if [[ -f "${script_dir}/template.yaml" ]]; then
-        cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
-        success "Copied template.yaml"
-    fi
-
-    if [[ -f "${script_dir}/network-rules.sh" ]]; then
-        cp "${script_dir}/network-rules.sh" "${NETWORK_RULES}"
-        chmod +x "${NETWORK_RULES}"
-        success "Copied network-rules.sh"
-    fi
-
-    success "csb initialized at ${CSB_DIR}"
-}
-
 # Command: help
 cmd_help() {
     cat << EOF
@@ -519,7 +497,6 @@ Commands:
   status         Show VM state
   config         Adjust VM resources (requires restart)
   destroy        Permanently delete the VM
-  init           Initialize csb config directory
   help           Show this help message
 
 Options:
@@ -566,7 +543,6 @@ main() {
         status)  cmd_status "$@" ;;
         config)  cmd_config "$@" ;;
         destroy) cmd_destroy "$@" ;;
-        init)    cmd_init "$@" ;;
         help|-h|--help) cmd_help ;;
         version|--version) echo "csb v${VERSION}" ;;
         *)
