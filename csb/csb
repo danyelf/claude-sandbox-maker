@@ -424,14 +424,18 @@ cmd_start() {
 
     start_vm "${vm_name}"
 
-    # Create new tmux session with Claude
+    # Create new tmux session with bash, then send claude command
+    # This ensures the session persists even if claude exits
     local session_name=$(get_next_session "${vm_name}")
     info "Creating session: ${session_name}"
 
-    if ! limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace "claude"; then
+    if ! limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace; then
         error "Failed to create tmux session '${session_name}'"
         exit 1
     fi
+
+    # Send claude command to the session
+    limactl shell --workdir / "${vm_name}" -- tmux send-keys -t "${session_name}" "claude" Enter
 
     # Attach to the session
     info "Attaching to ${session_name}..."
