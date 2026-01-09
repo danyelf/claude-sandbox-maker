@@ -158,8 +158,14 @@ run_with_spinner() {
     fi
 }
 
-# Cleanup spinner on exit
-trap 'stop_spinner false ""' EXIT
+# Cleanup function for all spinners
+cleanup_spinners() {
+    stop_spinner false "" 2>/dev/null
+    stop_progress_spinner 2>/dev/null
+}
+
+# Trap EXIT, INT (Ctrl+C), and TERM signals
+trap cleanup_spinners EXIT INT TERM
 
 # Escape string for use in sed replacement (handles |, &, \, newlines)
 escape_sed_replacement() {
