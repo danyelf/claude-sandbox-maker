@@ -254,15 +254,13 @@ create_vm() {
     # Ensure CSB directory exists
     mkdir -p "${CSB_DIR}"
 
-    # Check if template exists, if not copy it
-    if [[ ! -f "${TEMPLATE_FILE}" ]]; then
-        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        if [[ -f "${script_dir}/template.yaml" ]]; then
-            cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
-        else
-            error "Template not found. Please reinstall csb."
-            exit 1
-        fi
+    # Always copy latest template (ensures updates are picked up)
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "${script_dir}/template.yaml" ]]; then
+        cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
+    else
+        error "Template not found. Please reinstall csb."
+        exit 1
     fi
 
     # Create temporary template with workspace substituted
