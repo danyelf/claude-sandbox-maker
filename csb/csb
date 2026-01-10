@@ -7,8 +7,29 @@ set -e
 VERSION="0.1.0"
 CSB_DIR="${HOME}/.csb"
 CSB_FILE=".csb"
-TEMPLATE_FILE="${CSB_DIR}/template.yaml"
 VERBOSE="${CSB_VERBOSE:-false}"
+
+# Find csb share directory (template.yaml, provision scripts, etc.)
+# Search order: $CSB_SHARE_DIR, /usr/local/share/csb, script directory
+get_share_dir() {
+    # 1. Environment override
+    if [[ -n "${CSB_SHARE_DIR:-}" && -d "${CSB_SHARE_DIR}" ]]; then
+        echo "${CSB_SHARE_DIR}"
+        return
+    fi
+    # 2. System install location
+    if [[ -d "/usr/local/share/csb" ]]; then
+        echo "/usr/local/share/csb"
+        return
+    fi
+    # 3. Same directory as script (dev/clone install)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    echo "${script_dir}"
+}
+
+CSB_SHARE_DIR_RESOLVED="$(get_share_dir)"
+TEMPLATE_FILE="${CSB_DIR}/template.yaml"
 
 # Colors for output
 RED='\033[0;31m'
@@ -268,11 +289,11 @@ create_vm() {
     mkdir -p "${CSB_DIR}"
 
     # Always copy latest template (ensures updates are picked up)
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [[ -f "${script_dir}/template.yaml" ]]; then
-        cp "${script_dir}/template.yaml" "${TEMPLATE_FILE}"
+    if [[ -f "${CSB_SHARE_DIR_RESOLVED}/template.yaml" ]]; then
+        cp "${CSB_SHARE_DIR_RESOLVED}/template.yaml" "${TEMPLATE_FILE}"
     else
-        error "Template not found. Please reinstall csb."
+        error "Template not found at ${CSB_SHARE_DIR_RESOLVED}/template.yaml"
+        error "Please reinstall csb or set CSB_SHARE_DIR."
         exit 1
     fi
 
