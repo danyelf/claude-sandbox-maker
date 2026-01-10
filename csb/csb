@@ -773,23 +773,10 @@ cmd_config() {
 
     require_vm "${vm_name}" "No VM found for this directory. Run 'csb start' first."
 
-    local key="${1:-}"
-    local value="${2:-}"
-
-    if [[ -z "${key}" ]]; then
-        echo "Usage: csb config <key> <value>"
-        echo ""
-        echo "Keys:"
-        echo "  cpus     Number of CPUs (e.g., 4)"
-        echo "  memory   Memory size (e.g., 4GiB)"
-        echo "  disk     Disk size (e.g., 50GiB)"
-        echo ""
-        echo "Note: Changes require VM restart (csb stop && csb start)"
-        exit 0
-    fi
-
-    warn "VM configuration changes require editing Lima config directly."
-    echo "Run: limactl edit ${vm_name}"
+    info "Edit VM configuration with Lima:"
+    echo "  limactl edit ${vm_name}"
+    echo ""
+    echo "Note: Changes require VM restart (csb stop && csb start)"
 }
 
 # Command: destroy
@@ -828,7 +815,7 @@ Commands:
   attach [n]     Attach to session n (or most recent if n not specified)
   list           Show VM status and all sessions
   status         Show VM state
-  config         Adjust VM resources (requires restart)
+  config         Show how to edit VM resources
   destroy        Permanently delete the VM
   help           Show this help message
 
