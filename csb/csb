@@ -291,6 +291,63 @@ create_vm() {
     success "VM created: ${vm_name} ${GRAY}(${create_duration})${NC}"
 }
 
+# Create VM from golden image (no provisioning)
+create_vm_from_golden() {
+    local vm_name="$1"
+    local workspace="$(pwd)"
+    local arch=$(uname -m)
+    local golden_image="${CSB_DIR}/golden-${arch}.qcow2"
+
+    # Map uname arch to Lima arch
+    local lima_arch
+    case "${arch}" in
+        x86_64)  lima_arch="x86_64" ;;
+        arm64)   lima_arch="aarch64" ;;
+        aarch64) lima_arch="aarch64" ;;
+        *)       error "Unsupported architecture: ${arch}"; exit 1 ;;
+    esac
+
+    info "Creating VM from golden image: ${vm_name}"
+    echo ""
+
+    # Generate minimal lima.yaml for golden image
+    local tmp_template=$(mktemp)
+    cat > "${tmp_template}" << YAML
+# Lima VM from golden image (pre-provisioned)
+images:
+  - location: "${golden_image}"
+    arch: "${lima_arch}"
+
+cpus: 4
+memory: "4GiB"
+disk: "30GiB"
+
+mounts:
+  - location: "${workspace}"
+    mountPoint: "/workspace"
+    writable: true
+
+ssh:
+  localPort: 0
+  forwardAgent: true
+
+containerd:
+  system: false
+  user: false
+
+env:
+  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+YAML
+
+    # Create the VM
+    run_with_spinner "Creating VM" "VM created" \
+        limactl create --tty=false --name="${vm_name}" "${tmp_template}"
+    rm -f "${tmp_template}"
+
+    # Save config
+    save_config "${vm_name}"
+}
+
 # Start VM with progress display
 # Polls cloud-init log for CSB_PROGRESS markers
 start_vm() {
@@ -541,6 +598,52 @@ cmd_create() {
     limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session_name}"
 }
 
+# Command: start (from golden image)
+cmd_start() {
+    check_lima
+    local vm_name=$(get_vm_name)
+    local arch=$(uname -m)
+    local golden_image="${CSB_DIR}/golden-${arch}.qcow2"
+
+    # Require golden image exists
+    if [[ ! -f "${golden_image}" ]]; then
+        error "No golden image found: ${golden_image}"
+        echo "Run 'csb create' to provision a VM, then 'csb snapshot' to create a golden image."
+        exit 1
+    fi
+
+    # Create VM from golden if it doesn't exist
+    if ! vm_exists "${vm_name}"; then
+        create_vm_from_golden "${vm_name}"
+    fi
+
+    # Start VM (no provisioning progress since golden is pre-provisioned)
+    local status=$(vm_status "${vm_name}")
+    if [[ "${status}" != "Running" ]]; then
+        run_with_spinner "Starting VM" "VM started" \
+            limactl start --tty=false "${vm_name}"
+    fi
+
+    # Create new tmux session with bash, then send claude command
+    local session_name=$(get_next_session "${vm_name}")
+    info "Creating session: ${session_name}"
+
+    if ! limactl shell --workdir / "${vm_name}" -- tmux new-session -d -s "${session_name}" -c /workspace; then
+        error "Failed to create tmux session '${session_name}'"
+        exit 1
+    fi
+
+    # Remove settings.json which can cause Claude to panic (Claude bug)
+    limactl shell --workdir / "${vm_name}" -- rm -f '$HOME/.claude/settings.json'
+
+    # Send claude command to the session (skip permissions since VM is sandboxed)
+    limactl shell --workdir / "${vm_name}" -- tmux send-keys -t "${session_name}" "claude --dangerously-skip-permissions" Enter
+
+    # Attach to the session
+    info "Attaching to ${session_name}..."
+    limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session_name}"
+}
+
 # Command: stop
 cmd_stop() {
     check_lima
@@ -717,6 +820,7 @@ Usage: csb [--verbose] <command> [options]
 
 Commands:
   create         Provision VM from scratch and start Claude session
+  start          Start from golden image (fast, requires prior snapshot)
   stop           Shut down the VM
   snapshot       Save VM state as golden image for fast startup
   shell          Open bash shell inside VM
@@ -732,8 +836,9 @@ Options:
   --verbose, -v  Show detailed output from Lima commands
 
 Examples:
-  csb create          # Provision VM and start Claude session
-  csb --verbose create # Create with detailed Lima output
+  csb create          # Provision VM from scratch (slow, first time)
+  csb snapshot        # Save provisioned state as golden image
+  csb start           # Start from golden image (fast)
   csb attach 1        # Attach to session claude-1
   csb shell           # Open shell in VM
   csb stop            # Stop the VM
@@ -769,6 +874,7 @@ main() {
 
     case "${cmd}" in
         create)   cmd_create "$@" ;;
+        start)    cmd_start "$@" ;;
         stop)     cmd_stop "$@" ;;
         snapshot) cmd_snapshot "$@" ;;
         shell)    cmd_shell "$@" ;;
