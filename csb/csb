@@ -51,7 +51,7 @@ _spinner_loop() {
         else
             msg="$static_msg"
         fi
-        printf "\r${BLUE}[csb]${NC} %s %s%s" "$msg" "${SPINNER_CHARS:$i:1}" "$elapsed_str"
+        echo -en "\r${BLUE}[csb]${NC} ${msg} ${SPINNER_CHARS:$i:1}${elapsed_str}"
         i=$(( (i + 1) % ${#SPINNER_CHARS} ))
         sleep $SPINNER_DELAY
     done
