@@ -589,6 +589,20 @@ get_git_remote() {
     git remote get-url origin 2>/dev/null || echo ""
 }
 
+# Convert SSH git URL to HTTPS URL
+# git@github.com:user/repo.git -> https://github.com/user/repo.git
+ssh_to_https_url() {
+    local url="$1"
+    if [[ "${url}" =~ ^git@([^:]+):(.+)$ ]]; then
+        local host="${BASH_REMATCH[1]}"
+        local path="${BASH_REMATCH[2]}"
+        echo "https://${host}/${path}"
+    else
+        # Already HTTPS or other format, return as-is
+        echo "${url}"
+    fi
+}
+
 # Get agent slot number for consistent port assignment
 # Extracts trailing number from name, or derives from UID
 get_agent_slot() {
@@ -647,10 +661,22 @@ start_agent() {
 
     # Clone or update repo
     if [[ -n "${git_remote}" ]]; then
+        # Convert SSH URL to HTTPS for agent access
+        local https_remote=$(ssh_to_https_url "${git_remote}")
+
+        # Set up git credential helper if GITHUB_TOKEN is available
+        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
+                git config --global credential.helper store
+                echo 'https://x-access-token:${GITHUB_TOKEN}@github.com' > ~/.git-credentials
+                chmod 600 ~/.git-credentials
+            "
+        fi
+
         info "Syncing repository..."
         limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
             if [ ! -d ~/repo/.git ]; then
-                git clone '${git_remote}' ~/repo
+                git clone '${https_remote}' ~/repo
             else
                 cd ~/repo && git fetch origin && git rebase origin/main || git rebase origin/master || true
             fi
