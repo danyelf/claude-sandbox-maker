@@ -860,27 +860,42 @@ cmd_list() {
     echo ""
 
     if vm_exists "${vm_name}" && [[ "$(vm_status "${vm_name}")" == "Running" ]]; then
-        # Get all sessions
-        local all_sessions=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null)
+        local has_sessions=false
 
-        if [[ -z "${all_sessions}" ]]; then
-            echo "No sessions running"
-            return
-        fi
-
-        # Categorize sessions
-        local claude_sessions=$(echo "${all_sessions}" | grep -E '^claude-[0-9]+$' || true)
-        local agent_sessions=$(echo "${all_sessions}" | grep -vE '^claude-[0-9]+$' || true)
+        # Get shared sessions (claude-N) from default user
+        local claude_sessions=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' || true)
 
         if [[ -n "${claude_sessions}" ]]; then
+            has_sessions=true
             echo "Shared sessions (in /workspace):"
             echo "${claude_sessions}" | while read -r s; do echo "  ${s}"; done
         fi
 
-        if [[ -n "${agent_sessions}" ]]; then
-            echo ""
-            echo "Isolated agents (separate users):"
-            echo "${agent_sessions}" | while read -r s; do echo "  ${s}"; done
+        # Get agent sessions - each agent user has their own tmux server
+        # List home directories, exclude system users (ubuntu, *.linux)
+        local agent_users=$(limactl shell --workdir / "${vm_name}" -- ls /home 2>/dev/null | grep -vE '^(ubuntu|.*\.linux)$' || true)
+
+        if [[ -n "${agent_users}" ]]; then
+            local agent_header_shown=false
+            while read -r agent_user; do
+                [[ -z "${agent_user}" ]] && continue
+                # Check if this user has a tmux session
+                # Note: < /dev/null prevents limactl from consuming stdin (the while loop input)
+                local agent_session=$(limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_user}" tmux list-sessions -F '#{session_name}' < /dev/null 2>/dev/null || true)
+                if [[ -n "${agent_session}" ]]; then
+                    if [[ "${agent_header_shown}" == "false" ]]; then
+                        [[ "${has_sessions}" == "true" ]] && echo ""
+                        echo "Isolated agents (separate users):"
+                        agent_header_shown=true
+                    fi
+                    has_sessions=true
+                    echo "  ${agent_user}"
+                fi
+            done <<< "${agent_users}"
+        fi
+
+        if [[ "${has_sessions}" == "false" ]]; then
+            echo "No sessions running"
         fi
     fi
 }
