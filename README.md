@@ -47,9 +47,6 @@ export PATH="$PATH:$(pwd)/claude-sandbox-maker/csb"
 ## Quick Start
 
 ```bash
-# Set your API key
-export ANTHROPIC_API_KEY="sk-ant-..."
-
 # Navigate to your project
 cd ~/my-project
 

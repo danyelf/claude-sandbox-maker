@@ -55,7 +55,6 @@ provision:
 
 # Environment variables
 env:
-  ANTHROPIC_API_KEY: "{{ANTHROPIC_API_KEY}}"
   GITHUB_TOKEN: "{{GITHUB_TOKEN}}"
 
 # Message displayed after VM starts

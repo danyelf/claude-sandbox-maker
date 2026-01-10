@@ -84,7 +84,6 @@ install() {
     info "Installation complete!"
     echo ""
     echo "Usage:"
-    echo "  export ANTHROPIC_API_KEY=\"sk-ant-...\""
     echo "  cd /path/to/project"
     echo "  csb start"
 }
