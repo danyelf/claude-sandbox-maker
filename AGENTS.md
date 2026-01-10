@@ -84,3 +84,14 @@ git push
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## CSB Testing Tips
+
+When testing csb commands that provision VMs, use `--slow-progress` to reduce token usage:
+
+```bash
+csb --slow-progress start       # Polls every 5s instead of 1s
+CSB_SLOW_PROGRESS=true csb start  # Same via environment variable
+```
+
+This reduces the number of SSH commands during VM provisioning, saving tokens in agent conversations.
