@@ -8,6 +8,7 @@ VERSION="0.1.0"
 CSB_DIR="${HOME}/.csb"
 CSB_FILE=".csb"
 VERBOSE="${CSB_VERBOSE:-false}"
+SLOW_PROGRESS="${CSB_SLOW_PROGRESS:-false}"
 
 # Find csb share directory (template.yaml, provision scripts, etc.)
 # Search order: $CSB_SHARE_DIR, /usr/local/share/csb, script directory
@@ -419,7 +420,11 @@ start_vm() {
         local lima_pid=$!
         disown $lima_pid 2>/dev/null
 
-        # Monitor progress by polling cloud-init log via SSH (1s interval)
+        # Monitor progress by polling cloud-init log via SSH
+        # Use longer interval with --slow-progress to reduce token usage during testing
+        local poll_interval=1
+        [[ "${SLOW_PROGRESS}" == "true" ]] && poll_interval=5
+
         while kill -0 $lima_pid 2>/dev/null; do
             # Try to get latest progress and check for errors from VM's cloud-init log
             local new_stage=""
@@ -496,7 +501,7 @@ start_vm() {
                 fi
             fi
 
-            sleep 1
+            sleep $poll_interval
         done
 
         # Stop spinner and get exit code
@@ -1003,7 +1008,7 @@ cmd_help() {
     cat << EOF
 csb - Claude SandBox v${VERSION}
 
-Usage: csb [--verbose] <command> [options]
+Usage: csb [--verbose] [--slow-progress] <command> [options]
 
 Commands:
   create           Provision VM from scratch and start Claude session
@@ -1023,6 +1028,7 @@ Commands:
 
 Options:
   --verbose, -v    Show detailed output from Lima commands
+  --slow-progress  Poll progress less frequently (5s vs 1s, saves tokens)
 
 Examples:
   csb create            # Provision VM from scratch (slow, first time)
@@ -1037,8 +1043,9 @@ Examples:
   csb stop              # Stop the VM
 
 Environment:
-  GITHUB_TOKEN        GitHub token for git HTTPS authentication
-  CSB_VERBOSE=true    Enable verbose output
+  GITHUB_TOKEN           GitHub token for git HTTPS authentication
+  CSB_VERBOSE=true       Enable verbose output
+  CSB_SLOW_PROGRESS=true Poll progress less frequently (saves tokens)
 
 Parallel Agents:
   Each agent gets its own Linux user with isolated home directory.
@@ -1064,6 +1071,10 @@ main() {
         case "$1" in
             --verbose|-v)
                 VERBOSE=true
+                shift
+                ;;
+            --slow-progress)
+                SLOW_PROGRESS=true
                 shift
                 ;;
             *)
