@@ -108,7 +108,10 @@ start_progress_spinner() {
 update_progress_spinner() {
     local new_stage="$1"
     if [[ -n "${progress_spinner_statefile}" && -f "${progress_spinner_statefile}" ]]; then
-        echo "${new_stage}" > "${progress_spinner_statefile}"
+        # Write to temp file then mv for atomic update (avoids race with spinner reader)
+        local tmp_file="${progress_spinner_statefile}.tmp"
+        echo "${new_stage}" > "${tmp_file}"
+        mv "${tmp_file}" "${progress_spinner_statefile}"
     fi
 }
 
