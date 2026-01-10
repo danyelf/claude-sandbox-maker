@@ -25,7 +25,39 @@ warn() { echo -e "${YELLOW}[csb]${NC} $1"; }
 error() { echo -e "${RED}[csb]${NC} $1" >&2; }
 dim() { echo -e "${GRAY}     $1${NC}"; }
 
-# Spinner for long-running operations
+# Spinner animation constants
+SPINNER_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPINNER_DELAY=0.1
+
+# Core spinner loop - runs in subshell, renders spinner with optional timing
+# Args: statefile (empty for simple mode), message (for simple mode)
+_spinner_loop() {
+    local statefile="$1"
+    local static_msg="$2"
+    local i=0
+    local stime=$(date +%s)
+
+    while true; do
+        local msg elapsed_str=""
+        if [[ -n "$statefile" ]]; then
+            [[ -f "$statefile" ]] || break
+            msg=$(head -1 "$statefile" 2>/dev/null || echo "Starting")
+            local elapsed=$(($(date +%s) - stime))
+            if [[ $elapsed -lt 60 ]]; then
+                elapsed_str=" ${GRAY}[${elapsed}s]${NC}"
+            else
+                elapsed_str=" ${GRAY}[$((elapsed / 60))m $((elapsed % 60))s]${NC}"
+            fi
+        else
+            msg="$static_msg"
+        fi
+        printf "\r${BLUE}[csb]${NC} %s %s%s" "$msg" "${SPINNER_CHARS:$i:1}" "$elapsed_str"
+        i=$(( (i + 1) % ${#SPINNER_CHARS} ))
+        sleep $SPINNER_DELAY
+    done
+}
+
+# Simple spinner for short operations
 spinner_pid=""
 start_spinner() {
     local msg="$1"
@@ -33,16 +65,7 @@ start_spinner() {
         info "$msg"
         return
     fi
-
-    (
-        local chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        local i=0
-        while true; do
-            printf "\r${BLUE}[csb]${NC} %s %s" "$msg" "${chars:$i:1}"
-            i=$(( (i + 1) % 10 ))
-            sleep 0.1
-        done
-    ) &
+    _spinner_loop "" "$msg" &
     spinner_pid=$!
     disown $spinner_pid 2>/dev/null
 }
@@ -68,37 +91,16 @@ stop_spinner() {
 }
 
 # Progress spinner with timing - for long operations with stage updates
-# Uses a state file to communicate between main loop and spinner
 progress_spinner_statefile=""
 progress_spinner_pid=""
 
 start_progress_spinner() {
     local initial_stage="$1"
-    local start_time=$(date +%s)
 
     progress_spinner_statefile=$(mktemp)
     echo "${initial_stage}" > "${progress_spinner_statefile}"
-    echo "${start_time}" >> "${progress_spinner_statefile}"
 
-    (
-        local chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        local i=0
-        local stime="${start_time}"
-        while [[ -f "${progress_spinner_statefile}" ]]; do
-            local stage=$(head -1 "${progress_spinner_statefile}" 2>/dev/null || echo "Starting")
-            local now=$(date +%s)
-            local elapsed=$((now - stime))
-            local elapsed_str
-            if [[ $elapsed -lt 60 ]]; then
-                elapsed_str="${elapsed}s"
-            else
-                elapsed_str="$((elapsed / 60))m $((elapsed % 60))s"
-            fi
-            printf "\r${BLUE}[csb]${NC} %s %s ${GRAY}[%s]${NC}" "${stage}" "${chars:$i:1}" "${elapsed_str}"
-            i=$(( (i + 1) % 10 ))
-            sleep 0.1
-        done
-    ) &
+    _spinner_loop "$progress_spinner_statefile" "" &
     progress_spinner_pid=$!
     disown $progress_spinner_pid 2>/dev/null
 }
@@ -106,9 +108,7 @@ start_progress_spinner() {
 update_progress_spinner() {
     local new_stage="$1"
     if [[ -n "${progress_spinner_statefile}" && -f "${progress_spinner_statefile}" ]]; then
-        local stime=$(tail -1 "${progress_spinner_statefile}")
         echo "${new_stage}" > "${progress_spinner_statefile}"
-        echo "${stime}" >> "${progress_spinner_statefile}"
     fi
 }
 
