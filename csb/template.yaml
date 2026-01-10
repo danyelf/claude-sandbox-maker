@@ -109,9 +109,6 @@ provision:
         echo "--- Install succeeded in $((END_TIME - START_TIME))s ---" >> "$DIAG_LOG"
       fi
 
-      # Remove any old settings.json (we use --dangerously-skip-permissions instead)
-      rm -f ~/.claude/settings.json
-
       # Skip plugin installation during provisioning - it doesn't persist properly
       # Instead, install on first login via .bashrc
       echo "CSB_PROGRESS:Configuring plugin installer"
