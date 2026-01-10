@@ -16,6 +16,12 @@ cpus: 4
 memory: "4GiB"
 disk: "30GiB"
 
+# Use a consistent username for all csb VMs (not host username)
+# This ensures tools installed in /home/csb are accessible to all agents
+user:
+  name: csb
+  home: /home/csb
+
 # Mount workspace - this will be replaced at runtime with actual path
 mounts:
   - location: "{{WORKSPACE_PATH}}"
@@ -347,8 +353,8 @@ probes:
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      # Check for claude in user's npm-global directory
-      if ! timeout 30s bash -c "until [ -x \$HOME/.npm-global/bin/claude ]; do sleep 3; done"; then
+      # Check for claude in csb user's npm-global directory
+      if ! timeout 30s bash -c "until [ -x /home/csb/.npm-global/bin/claude ]; do sleep 3; done"; then
         echo >&2 "claude is not installed yet"
         exit 1
       fi

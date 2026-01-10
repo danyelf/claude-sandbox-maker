@@ -62,7 +62,7 @@ show_provisioning_warnings() {
 
 # Spinner animation constants
 SPINNER_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-SPINNER_DELAY=0.1
+SPINNER_DELAY=1
 
 # Core spinner loop - runs in subshell, renders spinner with optional timing
 # Args: statefile (empty for simple mode), message (for simple mode)
@@ -654,9 +654,17 @@ start_agent() {
     dim "Dev server port: ${dev_port} (PORT/CSB_DEV_PORT)"
 
     # Set up PATH, PORT, and CSB_DEV_PORT for the agent user
+    # Add to both .profile (login shells) and .bashrc (interactive shells)
     limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
+        if ! grep -q npm-global ~/.profile 2>/dev/null; then
+            echo 'export PATH=\"/home/csb/.npm-global/bin:\$PATH\"' >> ~/.profile
+        fi
         if ! grep -q npm-global ~/.bashrc 2>/dev/null; then
-            echo 'export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"' >> ~/.bashrc
+            echo 'export PATH=\"/home/csb/.npm-global/bin:\$PATH\"' >> ~/.bashrc
+        fi
+        if ! grep -q CSB_DEV_PORT ~/.profile 2>/dev/null; then
+            echo 'export PORT=${dev_port}' >> ~/.profile
+            echo 'export CSB_DEV_PORT=${dev_port}' >> ~/.profile
         fi
         if ! grep -q CSB_DEV_PORT ~/.bashrc 2>/dev/null; then
             echo 'export PORT=${dev_port}' >> ~/.bashrc
@@ -920,8 +928,8 @@ cmd_list() {
         fi
 
         # Get agent sessions - each agent user has their own tmux server
-        # List home directories, exclude system users (ubuntu, *.linux)
-        local agent_users=$(limactl shell --workdir / "${vm_name}" -- ls /home 2>/dev/null | grep -vE '^(ubuntu|.*\.linux)$' || true)
+        # List home directories, exclude system users (csb is the main user, *.linux for legacy)
+        local agent_users=$(limactl shell --workdir / "${vm_name}" -- ls /home 2>/dev/null | grep -vE '^(csb|.*\.linux)$' || true)
 
         if [[ -n "${agent_users}" ]]; then
             local agent_header_shown=false
