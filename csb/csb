@@ -624,6 +624,10 @@ Environment:
   ANTHROPIC_API_KEY   API key for Claude (passed to VM)
   CSB_VERBOSE=true    Enable verbose output
 
+Notes:
+  Claude runs with --dangerously-skip-permissions since the VM itself
+  provides sandboxing (network allowlist, isolated filesystem).
+
 EOF
 }
 
