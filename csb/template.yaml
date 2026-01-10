@@ -93,6 +93,12 @@ provision:
       claude plugin install beads@beads-marketplace 2>&1 || echo "CSB_WARN:beads plugin install failed"
       claude plugin install superpowers@superpowers-marketplace 2>&1 || echo "CSB_WARN:superpowers plugin install failed"
 
+      # Mark plugins as configured if both installed successfully (suppresses bashrc reminder)
+      if grep -q "beads@beads-marketplace" ~/.claude/plugins/installed_plugins.json 2>/dev/null && \
+         grep -q "superpowers@superpowers-marketplace" ~/.claude/plugins/installed_plugins.json 2>/dev/null; then
+        touch ~/.csb-plugins-configured
+      fi
+
       # Show setup reminder on first login with plugin commands inline (fallback if auto-install fails)
       cat >> ~/.bashrc << 'EOFRC'
 
