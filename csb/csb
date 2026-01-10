@@ -509,8 +509,8 @@ list_sessions() {
     limactl shell --workdir / "${vm_name}" -- tmux list-sessions 2>/dev/null || echo "No sessions"
 }
 
-# Command: start
-cmd_start() {
+# Command: create
+cmd_create() {
     check_lima
     local vm_name=$(get_vm_name)
 
@@ -688,7 +688,7 @@ csb - Claude SandBox v${VERSION}
 Usage: csb [--verbose] <command> [options]
 
 Commands:
-  start          Create new Claude session and attach (creates VM on first run)
+  create         Provision VM from scratch and start Claude session
   stop           Shut down the VM
   shell          Open bash shell inside VM
   logs           View VM provisioning logs
@@ -703,8 +703,8 @@ Options:
   --verbose, -v  Show detailed output from Lima commands
 
 Examples:
-  csb start           # Start Claude in sandbox (creates VM if needed)
-  csb --verbose start # Start with detailed Lima output
+  csb create          # Provision VM and start Claude session
+  csb --verbose create # Create with detailed Lima output
   csb attach 1        # Attach to session claude-1
   csb shell           # Open shell in VM
   csb stop            # Stop the VM
@@ -739,7 +739,7 @@ main() {
     shift || true
 
     case "${cmd}" in
-        start)   cmd_start "$@" ;;
+        create)  cmd_create "$@" ;;
         stop)    cmd_stop "$@" ;;
         shell)   cmd_shell "$@" ;;
         logs)    cmd_logs "$@" ;;
