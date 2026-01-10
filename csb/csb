@@ -25,6 +25,19 @@ warn() { echo -e "${YELLOW}[csb]${NC} $1"; }
 error() { echo -e "${RED}[csb]${NC} $1" >&2; }
 dim() { echo -e "${GRAY}     $1${NC}"; }
 
+# Display any CSB_WARN messages from provisioning log
+show_provisioning_warnings() {
+    local vm_name="$1"
+    local warnings
+    warnings=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_WARN:' /var/log/cloud-init-output.log 2>/dev/null | sed 's/.*CSB_WARN://' || true)
+    if [[ -n "${warnings}" ]]; then
+        echo ""
+        while IFS= read -r warning_msg; do
+            warn "⚠ ${warning_msg}"
+        done <<< "${warnings}"
+    fi
+}
+
 # Spinner animation constants
 SPINNER_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPINNER_DELAY=0.1
@@ -481,15 +494,7 @@ start_vm() {
             echo ""
             success "VM started ${GRAY}(total: ${total_duration})${NC}"
 
-            # Check for any warnings from provisioning
-            local warnings
-            warnings=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_WARN:' /var/log/cloud-init-output.log 2>/dev/null | sed 's/.*CSB_WARN://' || true)
-            if [[ -n "${warnings}" ]]; then
-                echo ""
-                while IFS= read -r warning_msg; do
-                    warn "⚠ ${warning_msg}"
-                done <<< "${warnings}"
-            fi
+            show_provisioning_warnings "${vm_name}"
         else
             # limactl exited with error - but check if VM is actually running
             # (Lima 2.0 has a bug where it times out waiting for "running" event
@@ -506,15 +511,7 @@ start_vm() {
                     echo ""
                     success "VM started ${GRAY}(total: ${total_duration})${NC}"
 
-                    # Check for any warnings from provisioning
-                    local warnings
-                    warnings=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_WARN:' /var/log/cloud-init-output.log 2>/dev/null | sed 's/.*CSB_WARN://' || true)
-                    if [[ -n "${warnings}" ]]; then
-                        echo ""
-                        while IFS= read -r warning_msg; do
-                            warn "⚠ ${warning_msg}"
-                        done <<< "${warnings}"
-                    fi
+                    show_provisioning_warnings "${vm_name}"
                     rm -f "${tmpfile}"
                     return 0
                 fi
