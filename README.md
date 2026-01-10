@@ -62,12 +62,40 @@ csb attach
 
 Your project directory is mounted at `/workspace` inside the VM.
 
+## Parallel Agents
+
+Run multiple isolated Claude agents in parallel, each with its own user and repo clone:
+
+```bash
+# Set GitHub token for git authentication
+export GITHUB_TOKEN="ghp_..."
+
+# Start isolated agents (each gets own Linux user)
+csb start agent1
+csb start agent2
+csb start agent3
+
+# List all sessions
+csb list
+
+# Attach to a specific agent
+csb attach agent1
+```
+
+**Key features:**
+- Each agent runs as a separate Linux user (`agent1`, `agent2`, etc.)
+- Home directories are `chmod 700` - agents cannot see each other's files
+- Git repo is cloned to `~/repo` for each agent (synced on start)
+- Kernel-enforced isolation (not just instruction-following)
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `csb start` | Create a new Claude session (creates VM on first run) |
+| `csb start` | Create a new shared Claude session in /workspace |
+| `csb start <agent>` | Create an isolated agent with own user and repo clone |
 | `csb attach [n]` | Attach to session n (default: most recent) |
+| `csb attach <agent>` | Attach to an agent's session |
 | `csb shell` | Open a bash shell in the VM |
 | `csb list` | Show VM status and active sessions |
 | `csb status` | Show VM state and configuration |

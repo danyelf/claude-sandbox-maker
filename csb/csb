@@ -594,6 +594,79 @@ list_sessions() {
     limactl shell --workdir / "${vm_name}" -- tmux list-sessions 2>/dev/null || echo "No sessions"
 }
 
+# Get git remote URL from current directory
+get_git_remote() {
+    git remote get-url origin 2>/dev/null || echo ""
+}
+
+# Start a named agent with isolated user
+# Creates Linux user, clones repo, runs claude as that user
+start_agent() {
+    local vm_name="$1"
+    local agent_name="$2"
+    local git_remote="$3"
+
+    # Validate agent name (alphanumeric and hyphens only)
+    if [[ ! "${agent_name}" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
+        error "Invalid agent name: ${agent_name}"
+        echo "Agent names must start with a letter and contain only letters, numbers, and hyphens."
+        exit 1
+    fi
+
+    info "Setting up agent: ${agent_name}"
+
+    # Create user if not exists (suppress error if exists)
+    limactl shell --workdir / "${vm_name}" -- sudo useradd -m -s /bin/bash "${agent_name}" 2>/dev/null || true
+
+    # Secure home directory (only this user can access)
+    limactl shell --workdir / "${vm_name}" -- sudo chmod 700 "/home/${agent_name}"
+
+    # Set up PATH for the agent user (needs npm-global in PATH)
+    limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c '
+        if ! grep -q npm-global ~/.bashrc 2>/dev/null; then
+            echo "export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"" >> ~/.bashrc
+        fi
+    '
+
+    # Clone or update repo
+    if [[ -n "${git_remote}" ]]; then
+        info "Syncing repository..."
+        limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
+            if [ ! -d ~/repo/.git ]; then
+                git clone '${git_remote}' ~/repo
+            else
+                cd ~/repo && git fetch origin && git rebase origin/main || git rebase origin/master || true
+            fi
+        "
+    else
+        warn "No git remote found - agent will have empty workspace"
+        limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" mkdir -p "/home/${agent_name}/repo"
+    fi
+
+    # Check if session already exists
+    if limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" tmux has-session -t "${agent_name}" 2>/dev/null; then
+        info "Attaching to existing session: ${agent_name}"
+    else
+        info "Creating session: ${agent_name}"
+
+        # Create tmux session as the agent user
+        if ! limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" tmux new-session -d -s "${agent_name}" -c "/home/${agent_name}/repo"; then
+            error "Failed to create tmux session '${agent_name}'"
+            exit 1
+        fi
+
+        # Remove settings.json which can cause Claude to panic
+        limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" rm -f "/home/${agent_name}/.claude/settings.json"
+
+        # Send claude command to the session
+        limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" tmux send-keys -t "${agent_name}" "claude --dangerously-skip-permissions" Enter
+    fi
+
+    # Attach to the session
+    info "Attaching to ${agent_name}..."
+    limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" tmux attach-session -t "${agent_name}"
+}
+
 # Command: create
 cmd_create() {
     check_lima
@@ -627,11 +700,15 @@ cmd_create() {
 }
 
 # Command: start (from golden image)
+# Usage: csb start [agent-name]
+#   Without agent-name: creates claude-N session in /workspace (shared mount)
+#   With agent-name: creates isolated agent with own user and repo clone
 cmd_start() {
     check_lima
     local vm_name=$(get_vm_name)
     local arch=$(uname -m)
     local golden_image="${CSB_DIR}/golden-${arch}.qcow2"
+    local agent_name="${1:-}"
 
     # Require golden image exists
     if [[ ! -f "${golden_image}" ]]; then
@@ -652,7 +729,14 @@ cmd_start() {
             limactl start --tty=false "${vm_name}"
     fi
 
-    # Create new tmux session with bash, then send claude command
+    # If agent name provided, use isolated agent mode
+    if [[ -n "${agent_name}" ]]; then
+        local git_remote=$(get_git_remote)
+        start_agent "${vm_name}" "${agent_name}" "${git_remote}"
+        return
+    fi
+
+    # Default mode: shared workspace with claude-N sessions
     local session_name=$(get_next_session "${vm_name}")
     info "Creating session: ${session_name}"
 
@@ -733,6 +817,8 @@ cmd_logs() {
 }
 
 # Command: attach
+# Usage: csb attach [session]
+#   session can be: number (for claude-N), or agent name
 cmd_attach() {
     check_lima
     local session="${1:-}"
@@ -743,19 +829,25 @@ cmd_attach() {
     start_vm "${vm_name}"
 
     if [[ -z "${session}" ]]; then
-        # Attach to most recent session
+        # Attach to most recent claude-N session
         local latest=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E '^claude-[0-9]+$' | sort -t'-' -k2 -n | tail -1)
         if [[ -z "${latest}" ]]; then
             error "No Claude sessions found. Run 'csb start' to create one."
             exit 1
         fi
         session="${latest}"
+        info "Attaching to ${session}..."
+        limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session}"
     elif [[ "${session}" =~ ^[0-9]+$ ]]; then
+        # Numeric session: claude-N
         session="claude-${session}"
+        info "Attaching to ${session}..."
+        limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session}"
+    else
+        # Named agent session: attach as that user
+        info "Attaching to agent ${session}..."
+        limactl shell --workdir / "${vm_name}" -- sudo -u "${session}" tmux attach-session -t "${session}"
     fi
-
-    info "Attaching to ${session}..."
-    limactl shell --workdir /workspace "${vm_name}" -- tmux attach-session -t "${session}"
 }
 
 # Command: list
@@ -768,8 +860,28 @@ cmd_list() {
     echo ""
 
     if vm_exists "${vm_name}" && [[ "$(vm_status "${vm_name}")" == "Running" ]]; then
-        echo "Sessions:"
-        list_sessions "${vm_name}"
+        # Get all sessions
+        local all_sessions=$(limactl shell --workdir / "${vm_name}" -- tmux list-sessions -F '#{session_name}' 2>/dev/null)
+
+        if [[ -z "${all_sessions}" ]]; then
+            echo "No sessions running"
+            return
+        fi
+
+        # Categorize sessions
+        local claude_sessions=$(echo "${all_sessions}" | grep -E '^claude-[0-9]+$' || true)
+        local agent_sessions=$(echo "${all_sessions}" | grep -vE '^claude-[0-9]+$' || true)
+
+        if [[ -n "${claude_sessions}" ]]; then
+            echo "Shared sessions (in /workspace):"
+            echo "${claude_sessions}" | while read -r s; do echo "  ${s}"; done
+        fi
+
+        if [[ -n "${agent_sessions}" ]]; then
+            echo ""
+            echo "Isolated agents (separate users):"
+            echo "${agent_sessions}" | while read -r s; do echo "  ${s}"; done
+        fi
     fi
 }
 
@@ -834,34 +946,45 @@ csb - Claude SandBox v${VERSION}
 Usage: csb [--verbose] <command> [options]
 
 Commands:
-  create         Provision VM from scratch and start Claude session
-  start          Start from golden image (fast, requires prior snapshot)
-  stop           Shut down the VM
-  snapshot       Save VM state as golden image for fast startup
-  shell          Open bash shell inside VM
-  logs           View VM provisioning logs
-  attach [n]     Attach to session n (or most recent if n not specified)
-  list           Show VM status and all sessions
-  status         Show VM state
-  config         Show how to edit VM resources
-  destroy        Permanently delete the VM
-  help           Show this help message
+  create           Provision VM from scratch and start Claude session
+  start [agent]    Start from golden image (fast, requires prior snapshot)
+                   Without agent: shared session in /workspace (claude-N)
+                   With agent: isolated user with own repo clone
+  stop             Shut down the VM
+  snapshot         Save VM state as golden image for fast startup
+  shell            Open bash shell inside VM
+  logs             View VM provisioning logs
+  attach [n|name]  Attach to session (number for claude-N, name for agent)
+  list             Show VM status and all sessions
+  status           Show VM state
+  config           Show how to edit VM resources
+  destroy          Permanently delete the VM
+  help             Show this help message
 
 Options:
-  --verbose, -v  Show detailed output from Lima commands
+  --verbose, -v    Show detailed output from Lima commands
 
 Examples:
-  csb create          # Provision VM from scratch (slow, first time)
-  csb snapshot        # Save provisioned state as golden image
-  csb start           # Start from golden image (fast)
-  csb attach 1        # Attach to session claude-1
-  csb shell           # Open shell in VM
-  csb stop            # Stop the VM
+  csb create            # Provision VM from scratch (slow, first time)
+  csb snapshot          # Save provisioned state as golden image
+  csb start             # Start shared session in /workspace
+  csb start agent1      # Start isolated agent (own user, cloned repo)
+  csb start agent2      # Start another isolated agent in parallel
+  csb attach 1          # Attach to session claude-1
+  csb attach agent1     # Attach to agent1's session
+  csb list              # Show all sessions (shared and agents)
+  csb shell             # Open shell in VM
+  csb stop              # Stop the VM
 
 Environment:
   ANTHROPIC_API_KEY   API key for Claude (passed to VM)
   GITHUB_TOKEN        GitHub token for git HTTPS authentication
   CSB_VERBOSE=true    Enable verbose output
+
+Parallel Agents:
+  Each agent gets its own Linux user with isolated home directory.
+  Agents cannot see each other's files (kernel-enforced via chmod 700).
+  Git repo is cloned to ~/repo for each agent (requires GITHUB_TOKEN).
 
 Notes:
   Claude runs with --dangerously-skip-permissions since the VM itself
