@@ -436,6 +436,36 @@ start_vm() {
                 done <<< "${warnings}"
             fi
         else
+            # limactl exited with error - but check if VM is actually running
+            # (Lima 2.0 has a bug where it times out waiting for "running" event
+            # even when the VM is running and provisioned)
+            local actual_status=$(vm_status "${vm_name}")
+            if [[ "${actual_status}" == "Running" ]]; then
+                # VM is running despite limactl error - check if cloud-init finished
+                local cloud_init_done=""
+                cloud_init_done=$(limactl shell --workdir / "${vm_name}" -- sudo cat /run/cloud-init/result.json 2>/dev/null || true)
+                if [[ -n "${cloud_init_done}" ]]; then
+                    # Cloud-init finished - treat as success
+                    warn "limactl reported timeout, but VM is running"
+                    success "✓ ${current_stage} ${GRAY}(${stage_duration})${NC}"
+                    echo ""
+                    success "VM started ${GRAY}(total: ${total_duration})${NC}"
+
+                    # Check for any warnings from provisioning
+                    local warnings
+                    warnings=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_WARN:' /var/log/cloud-init-output.log 2>/dev/null | sed 's/.*CSB_WARN://' || true)
+                    if [[ -n "${warnings}" ]]; then
+                        echo ""
+                        while IFS= read -r warning_msg; do
+                            warn "⚠ ${warning_msg}"
+                        done <<< "${warnings}"
+                    fi
+                    rm -f "${tmpfile}"
+                    return 0
+                fi
+            fi
+
+            # VM is not running or cloud-init didn't finish - actual failure
             error "Failed to start VM after ${total_duration}"
             echo ""
             # Show output for debugging
