@@ -530,6 +530,9 @@ cmd_start() {
         exit 1
     fi
 
+    # Remove settings.json which can cause Claude to panic (Claude bug)
+    limactl shell --workdir / "${vm_name}" -- rm -f '$HOME/.claude/settings.json'
+
     # Send claude command to the session (skip permissions since VM is sandboxed)
     limactl shell --workdir / "${vm_name}" -- tmux send-keys -t "${session_name}" "claude --dangerously-skip-permissions" Enter
 
