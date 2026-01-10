@@ -642,14 +642,15 @@ start_agent() {
     # Get agent slot for consistent port mapping
     local agent_slot=$(get_agent_slot "${vm_name}" "${agent_name}")
     local dev_port=$((5172 + agent_slot))
-    dim "Dev server port: ${dev_port} (CSB_DEV_PORT)"
+    dim "Dev server port: ${dev_port} (PORT/CSB_DEV_PORT)"
 
-    # Set up PATH and CSB_DEV_PORT for the agent user
+    # Set up PATH, PORT, and CSB_DEV_PORT for the agent user
     limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
         if ! grep -q npm-global ~/.bashrc 2>/dev/null; then
             echo 'export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"' >> ~/.bashrc
         fi
         if ! grep -q CSB_DEV_PORT ~/.bashrc 2>/dev/null; then
+            echo 'export PORT=${dev_port}' >> ~/.bashrc
             echo 'export CSB_DEV_PORT=${dev_port}' >> ~/.bashrc
         fi
     "
@@ -1030,9 +1031,9 @@ Parallel Agents:
   Git repo is cloned to ~/repo for each agent (requires GITHUB_TOKEN).
 
   Port Mapping:
-  Each agent gets a consistent dev port via CSB_DEV_PORT environment variable.
+  Each agent gets a consistent dev port via PORT and CSB_DEV_PORT env vars.
   agent1 -> 5173, agent2 -> 5174, etc. (based on trailing number in name).
-  Configure your dev server to use this port for predictable URLs.
+  PORT is recognized by Next.js, CRA, and many other frameworks automatically.
 
 Notes:
   Claude runs with --dangerously-skip-permissions since the VM itself
