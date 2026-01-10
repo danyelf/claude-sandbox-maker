@@ -551,6 +551,34 @@ cmd_stop() {
     stop_vm "${vm_name}"
 }
 
+# Command: snapshot
+cmd_snapshot() {
+    check_lima
+    local vm_name=$(get_vm_name)
+
+    require_vm "${vm_name}" "No VM found for this directory. Run 'csb create' first."
+
+    # Stop VM if running
+    local status=$(vm_status "${vm_name}")
+    if [[ "${status}" == "Running" ]]; then
+        stop_vm "${vm_name}"
+    fi
+
+    # Flatten diffdisk to golden image
+    local arch=$(uname -m)
+    local golden_image="${CSB_DIR}/golden-${arch}.qcow2"
+    local diffdisk="${HOME}/.lima/${vm_name}/diffdisk"
+
+    if [[ ! -f "${diffdisk}" ]]; then
+        error "VM disk not found: ${diffdisk}"
+        exit 1
+    fi
+
+    info "Creating golden image: ${golden_image}"
+    run_with_spinner "Flattening disk" "Golden image created: ${golden_image}" \
+        qemu-img convert -O qcow2 "${diffdisk}" "${golden_image}"
+}
+
 # Command: shell
 cmd_shell() {
     check_lima
@@ -690,6 +718,7 @@ Usage: csb [--verbose] <command> [options]
 Commands:
   create         Provision VM from scratch and start Claude session
   stop           Shut down the VM
+  snapshot       Save VM state as golden image for fast startup
   shell          Open bash shell inside VM
   logs           View VM provisioning logs
   attach [n]     Attach to session n (or most recent if n not specified)
@@ -739,9 +768,10 @@ main() {
     shift || true
 
     case "${cmd}" in
-        create)  cmd_create "$@" ;;
-        stop)    cmd_stop "$@" ;;
-        shell)   cmd_shell "$@" ;;
+        create)   cmd_create "$@" ;;
+        stop)     cmd_stop "$@" ;;
+        snapshot) cmd_snapshot "$@" ;;
+        shell)    cmd_shell "$@" ;;
         logs)    cmd_logs "$@" ;;
         attach)  cmd_attach "$@" ;;
         list)    cmd_list "$@" ;;
