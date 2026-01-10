@@ -571,7 +571,7 @@ cmd_logs() {
     require_vm "${vm_name}" "No VM found for this directory. Run 'csb start' first."
 
     start_vm "${vm_name}"
-    limactl shell "${vm_name}" -- cat /var/log/cloud-init-output.log
+    limactl shell --workdir / "${vm_name}" -- sudo cat /var/log/cloud-init-output.log
 }
 
 # Command: attach
