@@ -55,7 +55,7 @@ Your project directory is mounted at `/workspace` inside the VM.
 | `csb shell` | Open a bash shell in the VM |
 | `csb list` | Show VM status and active sessions |
 | `csb status` | Show VM state and configuration |
-| `csb config` | Adjust VM resources (CPUs, memory, disk) |
+| `csb config` | Show how to adjust VM resources |
 | `csb stop` | Shut down the VM |
 | `csb destroy` | Permanently delete the VM |
 
@@ -72,13 +72,15 @@ Your project directory is mounted at `/workspace` inside the VM.
 
 ## Configuration
 
-Adjust VM resources:
+VM resources can be adjusted via Lima:
 
 ```bash
-csb config --cpus 4 --memory 4GiB --disk 50GiB
+limactl edit <vm-name>
 ```
 
-Default: 2 CPUs, 2GiB memory, 20GiB disk
+Run `csb config` to see the VM name and instructions.
+
+Default: 4 CPUs, 4GiB memory, 30GiB disk
 
 ## Debugging
 
