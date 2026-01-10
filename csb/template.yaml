@@ -78,9 +78,32 @@ provision:
       npm install -g @anthropic-ai/claude-code
 
       echo "CSB_PROGRESS:Installing beads CLI"
+      # Diagnostic: test network before beads install
+      DIAG_LOG="/tmp/beads-install-diag.log"
+      {
+        echo "=== Beads Install Diagnostics $(date) ==="
+        echo "--- DNS Resolution ---"
+        time dig +short github.com 2>&1
+        time dig +short registry.npmjs.org 2>&1
+        echo "--- GitHub Connectivity ---"
+        curl -sI --connect-timeout 5 https://github.com 2>&1 | head -5
+        echo "--- NPM Registry ---"
+        curl -sI --connect-timeout 5 https://registry.npmjs.org/@beads/bd 2>&1 | head -5
+        echo "--- GitHub Releases (beads binary) ---"
+        curl -sI --connect-timeout 10 -L "https://github.com/steveyegge/beads/releases/download/v0.46.0/beads_0.46.0_linux_amd64.tar.gz" 2>&1 | head -10
+        echo "--- Starting npm install ---"
+      } >> "$DIAG_LOG" 2>&1
+
       # Timeout after 60s - postinstall downloads binaries and can hang on slow networks
-      if ! timeout 60 npm install -g @beads/bd; then
+      START_TIME=$(date +%s)
+      if ! timeout 60 npm install -g @beads/bd 2>&1 | tee -a "$DIAG_LOG"; then
+        END_TIME=$(date +%s)
+        echo "--- Install failed after $((END_TIME - START_TIME))s ---" >> "$DIAG_LOG"
         echo "CSB_WARN:beads CLI install failed or timed out (optional - install later with: npm install -g @beads/bd)"
+        echo "CSB_WARN:Diagnostics saved to $DIAG_LOG"
+      else
+        END_TIME=$(date +%s)
+        echo "--- Install succeeded in $((END_TIME - START_TIME))s ---" >> "$DIAG_LOG"
       fi
 
       # Remove any old settings.json (we use --dangerously-skip-permissions instead)
