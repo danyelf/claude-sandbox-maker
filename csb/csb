@@ -599,6 +599,24 @@ get_git_remote() {
     git remote get-url origin 2>/dev/null || echo ""
 }
 
+# Get agent slot number for consistent port assignment
+# Extracts trailing number from name, or derives from UID
+get_agent_slot() {
+    local vm_name="$1"
+    local agent_name="$2"
+
+    # Try to extract trailing number from agent name (e.g., "agent1" -> 1)
+    local trailing_num=$(echo "${agent_name}" | grep -oE '[0-9]+$' || true)
+    if [[ -n "${trailing_num}" ]]; then
+        echo "${trailing_num}"
+        return
+    fi
+
+    # Fall back to UID-based slot (UID - 1000)
+    local uid=$(limactl shell --workdir / "${vm_name}" -- id -u "${agent_name}" 2>/dev/null || echo "1001")
+    echo "$((uid - 1000))"
+}
+
 # Start a named agent with isolated user
 # Creates Linux user, clones repo, runs claude as that user
 start_agent() {
@@ -621,12 +639,20 @@ start_agent() {
     # Secure home directory (only this user can access)
     limactl shell --workdir / "${vm_name}" -- sudo chmod 700 "/home/${agent_name}"
 
-    # Set up PATH for the agent user (needs npm-global in PATH)
-    limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c '
+    # Get agent slot for consistent port mapping
+    local agent_slot=$(get_agent_slot "${vm_name}" "${agent_name}")
+    local dev_port=$((5172 + agent_slot))
+    dim "Dev server port: ${dev_port} (CSB_DEV_PORT)"
+
+    # Set up PATH and CSB_DEV_PORT for the agent user
+    limactl shell --workdir / "${vm_name}" -- sudo -u "${agent_name}" bash -c "
         if ! grep -q npm-global ~/.bashrc 2>/dev/null; then
-            echo "export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"" >> ~/.bashrc
+            echo 'export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"' >> ~/.bashrc
         fi
-    '
+        if ! grep -q CSB_DEV_PORT ~/.bashrc 2>/dev/null; then
+            echo 'export CSB_DEV_PORT=${dev_port}' >> ~/.bashrc
+        fi
+    "
 
     # Clone or update repo
     if [[ -n "${git_remote}" ]]; then
@@ -889,7 +915,9 @@ cmd_list() {
                         agent_header_shown=true
                     fi
                     has_sessions=true
-                    echo "  ${agent_user}"
+                    local agent_slot=$(get_agent_slot "${vm_name}" "${agent_user}")
+                    local dev_port=$((5172 + agent_slot))
+                    echo "  ${agent_user} (port ${dev_port})"
                 fi
             done <<< "${agent_users}"
         fi
@@ -1000,6 +1028,11 @@ Parallel Agents:
   Each agent gets its own Linux user with isolated home directory.
   Agents cannot see each other's files (kernel-enforced via chmod 700).
   Git repo is cloned to ~/repo for each agent (requires GITHUB_TOKEN).
+
+  Port Mapping:
+  Each agent gets a consistent dev port via CSB_DEV_PORT environment variable.
+  agent1 -> 5173, agent2 -> 5174, etc. (based on trailing number in name).
+  Configure your dev server to use this port for predictable URLs.
 
 Notes:
   Claude runs with --dangerously-skip-permissions since the VM itself
