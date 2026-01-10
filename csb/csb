@@ -563,6 +563,17 @@ cmd_shell() {
     limactl shell --workdir /workspace "${vm_name}"
 }
 
+# Command: logs
+cmd_logs() {
+    check_lima
+    local vm_name=$(get_vm_name)
+
+    require_vm "${vm_name}" "No VM found for this directory. Run 'csb start' first."
+
+    start_vm "${vm_name}"
+    limactl shell "${vm_name}" -- cat /var/log/cloud-init-output.log
+}
+
 # Command: attach
 cmd_attach() {
     check_lima
@@ -681,6 +692,7 @@ Commands:
   start          Create new Claude session and attach (creates VM on first run)
   stop           Shut down the VM
   shell          Open bash shell inside VM
+  logs           View VM provisioning logs
   attach [n]     Attach to session n (or most recent if n not specified)
   list           Show VM status and all sessions
   status         Show VM state
@@ -731,6 +743,7 @@ main() {
         start)   cmd_start "$@" ;;
         stop)    cmd_stop "$@" ;;
         shell)   cmd_shell "$@" ;;
+        logs)    cmd_logs "$@" ;;
         attach)  cmd_attach "$@" ;;
         list)    cmd_list "$@" ;;
         status)  cmd_status "$@" ;;
