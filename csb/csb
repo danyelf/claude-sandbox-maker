@@ -303,11 +303,20 @@ create_vm() {
     sed "s|{{WORKSPACE_PATH}}|${escaped_workspace}|g" "${TEMPLATE_FILE}" > "${tmp_template}"
 
     # Substitute API key if set
-    if [[ -n "${ANTHROPIC_API_KEY}" ]]; then
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         local escaped_key=$(escape_sed_replacement "${ANTHROPIC_API_KEY}")
         sed -i.bak "s|{{ANTHROPIC_API_KEY}}|${escaped_key}|g" "${tmp_template}"
     else
         sed -i.bak "s|{{ANTHROPIC_API_KEY}}||g" "${tmp_template}"
+    fi
+    rm -f "${tmp_template}.bak"
+
+    # Substitute GitHub token if set (for git HTTPS authentication)
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        local escaped_token=$(escape_sed_replacement "${GITHUB_TOKEN}")
+        sed -i.bak "s|{{GITHUB_TOKEN}}|${escaped_token}|g" "${tmp_template}"
+    else
+        sed -i.bak "s|{{GITHUB_TOKEN}}||g" "${tmp_template}"
     fi
     rm -f "${tmp_template}.bak"
 
@@ -371,6 +380,7 @@ containerd:
 
 env:
   ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+  GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
 YAML
 
     # Create the VM
@@ -850,6 +860,7 @@ Examples:
 
 Environment:
   ANTHROPIC_API_KEY   API key for Claude (passed to VM)
+  GITHUB_TOKEN        GitHub token for git HTTPS authentication
   CSB_VERBOSE=true    Enable verbose output
 
 Notes:

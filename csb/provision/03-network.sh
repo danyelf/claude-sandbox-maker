@@ -9,6 +9,19 @@ set -eux -o pipefail
 echo "CSB_PROGRESS:Applying network restrictions"
 
 # =============================================================
+# Git credentials for HTTPS authentication
+# Enables all users (including parallel agents) to push/pull via HTTPS
+# =============================================================
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "Configuring git credentials..."
+    mkdir -p /etc/csb
+    echo "https://oauth2:${GITHUB_TOKEN}@github.com" > /etc/csb/git-credentials
+    chmod 644 /etc/csb/git-credentials
+    git config --system credential.helper "store --file=/etc/csb/git-credentials"
+    echo "Git credentials configured for HTTPS authentication"
+fi
+
+# =============================================================
 # DNS-based domain allowlist for Claude Sandbox
 #
 # Strategy: Use dnsmasq to only resolve allowed domains.
