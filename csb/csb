@@ -332,10 +332,27 @@ start_vm() {
 
         # Monitor progress by polling cloud-init log via SSH (1s interval)
         while kill -0 $lima_pid 2>/dev/null; do
-            # Try to get latest progress from VM's cloud-init log
+            # Try to get latest progress and check for errors from VM's cloud-init log
             local new_stage=""
+            local error_marker=""
             if limactl shell --workdir / "${vm_name}" -- sudo test -f /var/log/cloud-init-output.log 2>/dev/null; then
                 new_stage=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_PROGRESS:' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | sed 's/.*CSB_PROGRESS://' || true)
+                # Check for explicit error markers from provisioning scripts
+                error_marker=$(limactl shell --workdir / "${vm_name}" -- sudo grep 'CSB_ERROR:' /var/log/cloud-init-output.log 2>/dev/null | tail -1 | sed 's/.*CSB_ERROR://' || true)
+            fi
+
+            # Handle explicit error markers (immediate failure detection)
+            if [[ -n "${error_marker}" ]]; then
+                stop_progress_spinner
+                error "✗ ${current_stage} failed"
+                echo ""
+                error "Error: ${error_marker}"
+                echo "" >&2
+                error "Last lines of provisioning output:"
+                limactl shell --workdir / "${vm_name}" -- sudo tail -30 /var/log/cloud-init-output.log 2>/dev/null >&2 || true
+                kill $lima_pid 2>/dev/null || true
+                rm -f "${tmpfile}"
+                exit 1
             fi
 
             if [[ -n "${new_stage}" && "${new_stage}" != "${last_stage}" ]]; then
@@ -355,6 +372,39 @@ start_vm() {
 
                 # Restart spinner with new stage
                 start_progress_spinner "${current_stage}"
+            fi
+
+            # Check if cloud-init has failed (provisioning script error)
+            local cloud_init_status=""
+            cloud_init_status=$(limactl shell --workdir / "${vm_name}" -- sudo cat /run/cloud-init/result.json 2>/dev/null || true)
+            if [[ -n "${cloud_init_status}" ]]; then
+                # result.json exists - check if there were errors
+                local has_errors=""
+                has_errors=$(echo "${cloud_init_status}" | jq -r '.v1.errors | length' 2>/dev/null || echo "0")
+                if [[ "${has_errors}" != "0" ]]; then
+                    # Cloud-init completed with errors - extract error details
+                    stop_progress_spinner
+                    error "✗ ${current_stage} failed"
+                    echo ""
+
+                    # Show cloud-init errors
+                    local error_msgs=""
+                    error_msgs=$(echo "${cloud_init_status}" | jq -r '.v1.errors[]' 2>/dev/null || true)
+                    if [[ -n "${error_msgs}" ]]; then
+                        error "Cloud-init errors:"
+                        echo "${error_msgs}" >&2
+                    fi
+
+                    # Show last part of cloud-init log for context
+                    echo "" >&2
+                    error "Last lines of provisioning output:"
+                    limactl shell --workdir / "${vm_name}" -- sudo tail -30 /var/log/cloud-init-output.log 2>/dev/null >&2 || true
+
+                    # Kill the lima process and cleanup
+                    kill $lima_pid 2>/dev/null || true
+                    rm -f "${tmpfile}"
+                    exit 1
+                fi
             fi
 
             sleep 1
