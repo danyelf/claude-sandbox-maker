@@ -55,7 +55,8 @@ provision:
         npm \
         jq \
         iptables \
-        dnsutils
+        dnsutils \
+        dnsmasq
 
       # Clean up apt cache
       apt-get clean
@@ -92,17 +93,19 @@ provision:
         echo "--- GitHub Releases (beads binary) ---"
         curl -sI --connect-timeout 10 -L "https://github.com/steveyegge/beads/releases/download/v0.46.0/beads_0.46.0_linux_amd64.tar.gz" 2>&1 | head -10
         echo "--- Starting npm install ---"
-      } >> "$DIAG_LOG" 2>&1
+      } >> "$DIAG_LOG" 2>&1 || true  # Diagnostics should never fail the install
 
       # Timeout after 60s - postinstall downloads binaries and can hang on slow networks
       START_TIME=$(date +%s)
-      if ! timeout 60 npm install -g @beads/bd 2>&1 | tee -a "$DIAG_LOG"; then
-        END_TIME=$(date +%s)
+      NPM_OUTPUT=$(timeout 60 npm install -g @beads/bd 2>&1) && NPM_OK=true || NPM_OK=false
+      echo "$NPM_OUTPUT" | tee -a "$DIAG_LOG"
+      END_TIME=$(date +%s)
+      if [ "$NPM_OK" = "false" ]; then
         echo "--- Install failed after $((END_TIME - START_TIME))s ---" >> "$DIAG_LOG"
-        echo "CSB_WARN:beads CLI install failed or timed out (optional - install later with: npm install -g @beads/bd)"
-        echo "CSB_WARN:Diagnostics saved to $DIAG_LOG"
+        NPM_ERROR=$(echo "$NPM_OUTPUT" | grep -i "error\|ERR!" | tail -1 | cut -c1-80)
+        echo "CSB_WARN:beads CLI install failed: ${NPM_ERROR:-timeout or unknown error}"
+        echo "CSB_WARN:Install later with: npm install -g @beads/bd"
       else
-        END_TIME=$(date +%s)
         echo "--- Install succeeded in $((END_TIME - START_TIME))s ---" >> "$DIAG_LOG"
       fi
 
@@ -151,49 +154,94 @@ provision:
 
       echo "CSB_PROGRESS:Applying network restrictions"
 
-      # Network allowlist for Claude Sandbox
-      # Blocks all outbound traffic except approved domains
+      # =============================================================
+      # DNS-based domain allowlist for Claude Sandbox
+      #
+      # Strategy: Use dnsmasq to only resolve allowed domains.
+      # Unknown domains return NXDOMAIN, so connections fail at DNS.
+      # iptables blocks external DNS and allows HTTP/HTTPS to anywhere
+      # (since only allowed domains can be resolved).
+      # =============================================================
 
-      ALLOWED_DOMAINS=(
-        # Package managers
-        "pypi.org"
-        "files.pythonhosted.org"
-        "registry.npmjs.org"
-        "crates.io"
-        "static.crates.io"
-        "rubygems.org"
-        "proxy.golang.org"
-        "sum.golang.org"
+      # Configure dnsmasq as local DNS resolver with domain allowlist
+      cat > /etc/dnsmasq.d/csb-allowlist.conf << 'EOFDNS'
+      # CSB Domain Allowlist
+      # Only these domains (and their subdomains) can be resolved
 
-        # Code hosting
-        "github.com"
-        "api.github.com"
-        "raw.githubusercontent.com"
-        "objects.githubusercontent.com"
-        "codeload.github.com"
-        "gitlab.com"
-        "bitbucket.org"
+      # Don't use /etc/resolv.conf (we'll set upstream separately)
+      no-resolv
 
-        # Claude / Anthropic
-        "api.anthropic.com"
-        "console.anthropic.com"
-        "statsig.anthropic.com"
+      # Upstream DNS servers (only used for allowed domains)
+      server=8.8.8.8
+      server=8.8.4.4
 
-        # DNS (required for resolution)
-        "dns.google"
+      # Block everything by default (return NXDOMAIN)
+      address=/#/
 
-        # Debian package repos (for apt)
-        "deb.debian.org"
-        "security.debian.org"
-        "cdn-fastly.deb.debian.org"
+      # === ALLOWED DOMAINS ===
+      # Format: server=/domain/upstream - forward to upstream DNS
 
-        # Node.js
-        "nodejs.org"
-        "registry.yarnpkg.com"
+      # Package managers
+      server=/pypi.org/8.8.8.8
+      server=/pythonhosted.org/8.8.8.8
+      server=/npmjs.org/8.8.8.8
+      server=/npmjs.com/8.8.8.8
+      server=/crates.io/8.8.8.8
+      server=/rubygems.org/8.8.8.8
+      server=/golang.org/8.8.8.8
+      server=/yarnpkg.com/8.8.8.8
 
-        # Cloud images (for Lima)
-        "cloud.debian.org"
-      )
+      # Code hosting (GitHub and its CDNs)
+      server=/github.com/8.8.8.8
+      server=/githubusercontent.com/8.8.8.8
+      server=/githubassets.com/8.8.8.8
+      server=/github.io/8.8.8.8
+      server=/gitlab.com/8.8.8.8
+      server=/bitbucket.org/8.8.8.8
+
+      # Claude / Anthropic
+      server=/anthropic.com/8.8.8.8
+
+      # Debian repos
+      server=/debian.org/8.8.8.8
+      server=/debian.net/8.8.8.8
+
+      # Node.js
+      server=/nodejs.org/8.8.8.8
+
+      # Common CDNs used by package managers
+      server=/cloudflare.com/8.8.8.8
+      server=/cloudflare-dns.com/8.8.8.8
+      server=/fastly.net/8.8.8.8
+      server=/akamai.net/8.8.8.8
+      server=/akamaized.net/8.8.8.8
+      server=/amazonaws.com/8.8.8.8
+      server=/azure.com/8.8.8.8
+      server=/windows.net/8.8.8.8
+      EOFDNS
+
+      # Stop dnsmasq if running, configure, and restart
+      systemctl stop dnsmasq 2>/dev/null || true
+
+      # Point system DNS to local dnsmasq
+      # Use resolvconf if available, otherwise write directly
+      if command -v resolvconf &> /dev/null; then
+        echo "nameserver 127.0.0.1" | resolvconf -a lo.dnsmasq
+      else
+        # Backup original and write new resolv.conf
+        cp /etc/resolv.conf /etc/resolv.conf.backup 2>/dev/null || true
+        echo "nameserver 127.0.0.1" > /etc/resolv.conf
+      fi
+
+      # Start dnsmasq
+      systemctl enable dnsmasq
+      systemctl start dnsmasq
+
+      echo "DNS allowlist configured via dnsmasq"
+
+      # === iptables rules ===
+      # Block external DNS, allow HTTP/HTTPS to anywhere
+      # (DNS filtering handles domain restrictions)
 
       # Helper: add iptables OUTPUT rule for both IPv4 and IPv6
       allow_output() {
@@ -201,61 +249,51 @@ provision:
         ip6tables -A OUTPUT "$@" 2>/dev/null || true
       }
 
-      # Resolve domain to IPs and add iptables rules
-      resolve_and_allow() {
-        local domain="$1"
-        local ips
+      echo "Configuring iptables..."
 
-        # Resolve domain to IP addresses
-        ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-        ips+=$'\n'$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
-
-        for ip in $ips; do
-          if [[ -n "$ip" && "$ip" != *";"* ]]; then
-            allow_output -d "$ip" -j ACCEPT
-          fi
-        done
-      }
-
-      echo "Configuring network allowlist..."
-
-      # Flush existing rules
+      # Flush existing OUTPUT rules
       iptables -F OUTPUT 2>/dev/null || true
       ip6tables -F OUTPUT 2>/dev/null || true
 
-      # Allow loopback
+      # Allow loopback (includes local DNS)
       allow_output -o lo -j ACCEPT
 
       # Allow established connections
       allow_output -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-      # Allow DNS (UDP and TCP port 53)
-      allow_output -p udp --dport 53 -j ACCEPT
-      allow_output -p tcp --dport 53 -j ACCEPT
+      # Allow DNS only to localhost (dnsmasq)
+      # Block external DNS to prevent bypassing the allowlist
+      allow_output -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
+      allow_output -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
+      allow_output -p udp --dport 53 -j DROP
+      allow_output -p tcp --dport 53 -j DROP
 
-      # Allow DHCP
+      # Allow DHCP (needed for Lima networking)
       allow_output -p udp --dport 67:68 -j ACCEPT
 
       # Allow NTP (time sync)
       allow_output -p udp --dport 123 -j ACCEPT
 
-      # Resolve and allow each domain
-      for domain in "${ALLOWED_DOMAINS[@]}"; do
-        echo "  Allowing: $domain"
-        resolve_and_allow "$domain"
-      done
+      # Allow HTTP/HTTPS to anywhere (DNS filtering handles restrictions)
+      allow_output -p tcp --dport 80 -j ACCEPT
+      allow_output -p tcp --dport 443 -j ACCEPT
+
+      # Allow git protocol (some repos use this)
+      allow_output -p tcp --dport 9418 -j ACCEPT
+
+      # Allow SSH (for git clone via SSH)
+      allow_output -p tcp --dport 22 -j ACCEPT
 
       # Drop everything else
       allow_output -j DROP
 
-      echo "Network allowlist configured."
+      echo "iptables configured"
 
       # Save rules to persist across reboots
-      if command -v iptables-save &> /dev/null; then
-        iptables-save > /etc/iptables.rules 2>/dev/null || true
-        ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
+      iptables-save > /etc/iptables.rules 2>/dev/null || true
+      ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
 
-        cat > /etc/systemd/system/iptables-restore.service << 'EOFSERVICE'
+      cat > /etc/systemd/system/iptables-restore.service << 'EOFSERVICE'
       [Unit]
       Description=Restore iptables rules
       Before=network-pre.target
@@ -271,12 +309,11 @@ provision:
       WantedBy=multi-user.target
       EOFSERVICE
 
-        systemctl daemon-reload 2>/dev/null || true
-        systemctl enable iptables-restore.service 2>/dev/null || true
-      fi
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable iptables-restore.service 2>/dev/null || true
 
       echo "CSB_PROGRESS:Setup complete"
-      echo "Network rules configured and will persist across reboots."
+      echo "Network restrictions configured (DNS-based allowlist + iptables)"
 
 # Environment variables
 env:

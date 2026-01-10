@@ -278,7 +278,7 @@ create_vm() {
     rm -f "${tmp_template}.bak"
 
     # Create the VM with progress feedback (--tty=false skips interactive prompts)
-    run_with_spinner "Downloading VM image" "VM image ready" \
+    run_with_spinner "Creating VM" "VM created" \
         limactl create --tty=false --name="${vm_name}" "${tmp_template}"
     rm -f "${tmp_template}"
 
