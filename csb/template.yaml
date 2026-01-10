@@ -1,5 +1,8 @@
 # Lima VM template for Claude Sandbox (csb)
 # This template creates a sandboxed environment for Claude Code development
+#
+# NOTE: This is a template file. Run build-template.sh to generate template.yaml
+# Placeholders ({{SCRIPT_*}}) are replaced at build time with provision scripts.
 
 # Base image - Debian slim
 images:
@@ -35,11 +38,14 @@ provision:
   - mode: system
     script: |
       #!/bin/bash
+      # shellcheck shell=bash
       set -eux -o pipefail
-
+      
+      # Install base system packages for Claude Sandbox
+      
       echo "CSB_PROGRESS:Updating package lists"
       apt-get update
-
+      
       echo "CSB_PROGRESS:Installing base packages (git, tmux, python3, nodejs)"
       apt-get install -y --no-install-recommends \
         tmux \
@@ -57,7 +63,7 @@ provision:
         iptables \
         dnsutils \
         dnsmasq
-
+      
       # Clean up apt cache
       apt-get clean
       rm -rf /var/lib/apt/lists/*
@@ -65,8 +71,14 @@ provision:
   - mode: user
     script: |
       #!/bin/bash
+      # shellcheck disable=SC2016  # We intentionally use single quotes to defer variable expansion
+      # 02-user-setup.sh - User-mode provisioning for Claude Sandbox
+      # Installs Claude Code CLI, beads CLI, and configures plugin installation
+      #
+      # This script runs as the regular user (not root) during Lima provisioning.
+      
       set -eux -o pipefail
-
+      
       # Configure npm to use user-writable directory for global packages
       mkdir -p ~/.npm-global
       npm config set prefix ~/.npm-global
@@ -74,10 +86,10 @@ provision:
       # Add to both .bashrc (interactive) and .profile (login shells)
       echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
       echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
-
+      
       echo "CSB_PROGRESS:Installing Claude Code CLI"
       npm install -g @anthropic-ai/claude-code
-
+      
       echo "CSB_PROGRESS:Installing beads CLI"
       # Timeout after 60s - postinstall downloads binaries and can hang on slow networks
       START_TIME=$(date +%s)
@@ -104,21 +116,21 @@ provision:
         echo "CSB_WARN:Diagnostics saved to $DIAG_LOG"
         echo "CSB_WARN:Install later with: npm install -g @beads/bd"
       fi
-
+      
       # Skip plugin installation during provisioning - it doesn't persist properly
       # Instead, install on first login via .bashrc
       echo "CSB_PROGRESS:Configuring plugin installer"
-
+      
       # Auto-install plugins on first interactive login
       cat >> ~/.bashrc << 'EOFRC'
-
+      
       # CSB first-run plugin installation
       if [ ! -f ~/.csb-plugins-configured ] && [ -t 0 ]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  Installing Claude plugins (first run)..."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
+      
         # Initialize Claude (required for plugin commands to work)
         if ! claude --version > /dev/null 2>&1; then
           echo "  ERROR: Claude initialization failed, will retry on next login"
@@ -128,7 +140,7 @@ provision:
           claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
           claude plugin install beads@beads-marketplace 2>&1 || true
           claude plugin install superpowers@superpowers-marketplace 2>&1 || true
-
+      
           # Mark as done
           touch ~/.csb-plugins-configured
           echo "  Done! Plugins installed."
@@ -136,17 +148,22 @@ provision:
         echo ""
       fi
       EOFRC
-
+      
       # Set workspace as default directory
       echo 'cd /workspace' >> ~/.bashrc
 
   - mode: system
     script: |
       #!/bin/bash
+      # shellcheck shell=bash
       set -eux -o pipefail
-
+      
+      # Configure network restrictions for Claude Sandbox
+      # - DNS-based domain allowlist via dnsmasq
+      # - iptables firewall rules
+      
       echo "CSB_PROGRESS:Applying network restrictions"
-
+      
       # =============================================================
       # DNS-based domain allowlist for Claude Sandbox
       #
@@ -155,156 +172,138 @@ provision:
       # iptables blocks external DNS and allows HTTP/HTTPS to anywhere
       # (since only allowed domains can be resolved).
       # =============================================================
-
-      # Configure dnsmasq as local DNS resolver with domain allowlist
-      cat > /etc/dnsmasq.d/csb-allowlist.conf << 'EOFDNS'
-      # CSB Domain Allowlist
+      
+      # Path to allowed domains list (injected during build)
+      ALLOWED_DOMAINS_FILE="${ALLOWED_DOMAINS_FILE:-/opt/csb/allowed-domains.txt}"
+      
+      # Generate dnsmasq config from allowed domains list
+      generate_dnsmasq_config() {
+          cat << 'EOF'
+      # CSB Domain Allowlist (auto-generated)
       # Only these domains (and their subdomains) can be resolved
-
+      
       # Don't use /etc/resolv.conf (we'll set upstream separately)
       no-resolv
-
+      
       # Upstream DNS servers (only used for allowed domains)
       server=8.8.8.8
       server=8.8.4.4
-
+      
       # Block everything by default (return NXDOMAIN)
       address=/#/
-
+      
       # === ALLOWED DOMAINS ===
-      # Format: server=/domain/upstream - forward to upstream DNS
-
-      # Package managers
-      server=/pypi.org/8.8.8.8
-      server=/pythonhosted.org/8.8.8.8
-      server=/npmjs.org/8.8.8.8
-      server=/npmjs.com/8.8.8.8
-      server=/crates.io/8.8.8.8
-      server=/rubygems.org/8.8.8.8
-      server=/golang.org/8.8.8.8
-      server=/yarnpkg.com/8.8.8.8
-
-      # Code hosting (GitHub and its CDNs)
-      server=/github.com/8.8.8.8
-      server=/githubusercontent.com/8.8.8.8
-      server=/githubassets.com/8.8.8.8
-      server=/github.io/8.8.8.8
-      server=/gitlab.com/8.8.8.8
-      server=/bitbucket.org/8.8.8.8
-
-      # Claude / Anthropic
-      server=/anthropic.com/8.8.8.8
-
-      # Debian repos
-      server=/debian.org/8.8.8.8
-      server=/debian.net/8.8.8.8
-
-      # Node.js
-      server=/nodejs.org/8.8.8.8
-
-      # Common CDNs used by package managers
-      server=/cloudflare.com/8.8.8.8
-      server=/cloudflare-dns.com/8.8.8.8
-      server=/fastly.net/8.8.8.8
-      server=/akamai.net/8.8.8.8
-      server=/akamaized.net/8.8.8.8
-      server=/amazonaws.com/8.8.8.8
-      server=/azure.com/8.8.8.8
-      server=/windows.net/8.8.8.8
-      EOFDNS
-
+      EOF
+      
+          # Read domains from config file, skip comments and empty lines
+          if [[ -f "$ALLOWED_DOMAINS_FILE" ]]; then
+              while IFS= read -r line || [[ -n "$line" ]]; do
+                  # Skip comments and empty lines
+                  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+                  [[ -z "${line// }" ]] && continue
+                  # Output dnsmasq server directive
+                  echo "server=/${line}/8.8.8.8"
+              done < "$ALLOWED_DOMAINS_FILE"
+          else
+              echo "# WARNING: $ALLOWED_DOMAINS_FILE not found, no domains allowed" >&2
+          fi
+      }
+      
+      # Configure dnsmasq as local DNS resolver with domain allowlist
+      generate_dnsmasq_config > /etc/dnsmasq.d/csb-allowlist.conf
+      
       # Stop dnsmasq if running, configure, and restart
       systemctl stop dnsmasq 2>/dev/null || true
-
+      
       # Point system DNS to local dnsmasq
       # Use resolvconf if available, otherwise write directly
       if command -v resolvconf &> /dev/null; then
-        echo "nameserver 127.0.0.1" | resolvconf -a lo.dnsmasq
+          echo "nameserver 127.0.0.1" | resolvconf -a lo.dnsmasq
       else
-        # Backup original and write new resolv.conf
-        cp /etc/resolv.conf /etc/resolv.conf.backup 2>/dev/null || true
-        echo "nameserver 127.0.0.1" > /etc/resolv.conf
+          # Backup original and write new resolv.conf
+          cp /etc/resolv.conf /etc/resolv.conf.backup 2>/dev/null || true
+          echo "nameserver 127.0.0.1" > /etc/resolv.conf
       fi
-
+      
       # Start dnsmasq
       systemctl enable dnsmasq
       systemctl start dnsmasq
-
+      
       echo "DNS allowlist configured via dnsmasq"
-
+      
       # === iptables rules ===
       # Block external DNS, allow HTTP/HTTPS to anywhere
       # (DNS filtering handles domain restrictions)
-
+      
       # Helper: add iptables OUTPUT rule for both IPv4 and IPv6
       allow_output() {
-        iptables -A OUTPUT "$@" 2>/dev/null || true
-        ip6tables -A OUTPUT "$@" 2>/dev/null || true
+          iptables -A OUTPUT "$@" 2>/dev/null || true
+          ip6tables -A OUTPUT "$@" 2>/dev/null || true
       }
-
+      
       echo "Configuring iptables..."
-
+      
       # Flush existing OUTPUT rules
       iptables -F OUTPUT 2>/dev/null || true
       ip6tables -F OUTPUT 2>/dev/null || true
-
+      
       # Allow loopback (includes local DNS)
       allow_output -o lo -j ACCEPT
-
+      
       # Allow established connections
       allow_output -m state --state ESTABLISHED,RELATED -j ACCEPT
-
+      
       # Allow DNS only to localhost (dnsmasq)
       # Block external DNS to prevent bypassing the allowlist
       allow_output -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
       allow_output -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
       allow_output -p udp --dport 53 -j DROP
       allow_output -p tcp --dport 53 -j DROP
-
+      
       # Allow DHCP (needed for Lima networking)
       allow_output -p udp --dport 67:68 -j ACCEPT
-
+      
       # Allow NTP (time sync)
       allow_output -p udp --dport 123 -j ACCEPT
-
+      
       # Allow HTTP/HTTPS to anywhere (DNS filtering handles restrictions)
       allow_output -p tcp --dport 80 -j ACCEPT
       allow_output -p tcp --dport 443 -j ACCEPT
-
+      
       # Allow git protocol (some repos use this)
       allow_output -p tcp --dport 9418 -j ACCEPT
-
+      
       # Allow SSH (for git clone via SSH)
       allow_output -p tcp --dport 22 -j ACCEPT
-
+      
       # Drop everything else
       allow_output -j DROP
-
+      
       echo "iptables configured"
-
+      
       # Save rules to persist across reboots
       iptables-save > /etc/iptables.rules 2>/dev/null || true
       ip6tables-save > /etc/ip6tables.rules 2>/dev/null || true
-
+      
       cat > /etc/systemd/system/iptables-restore.service << 'EOFSERVICE'
       [Unit]
       Description=Restore iptables rules
       Before=network-pre.target
       Wants=network-pre.target
-
+      
       [Service]
       Type=oneshot
       ExecStart=/sbin/iptables-restore /etc/iptables.rules
       ExecStart=/sbin/ip6tables-restore /etc/ip6tables.rules
       RemainAfterExit=yes
-
+      
       [Install]
       WantedBy=multi-user.target
       EOFSERVICE
-
+      
       systemctl daemon-reload 2>/dev/null || true
       systemctl enable iptables-restore.service 2>/dev/null || true
-
+      
       echo "CSB_PROGRESS:Setup complete"
       echo "Network restrictions configured (DNS-based allowlist + iptables)"
 
