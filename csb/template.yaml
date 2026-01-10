@@ -127,20 +127,38 @@ provision:
       fi
 
       # Install plugins from marketplaces
+      # Use full path and explicit sync to ensure files persist
+      PLUGIN_JSON="$HOME/.claude/plugins/installed_plugins.json"
+
       if claude plugin install beads@beads-marketplace 2>&1; then
+        sync  # Force filesystem sync
         echo "  Installed beads plugin"
+        echo "  DEBUG: installed_plugins.json exists: $(test -f "$PLUGIN_JSON" && echo yes || echo no)"
       else
         echo "CSB_WARN:beads plugin install failed"
       fi
+
       if claude plugin install superpowers@superpowers-marketplace 2>&1; then
+        sync  # Force filesystem sync
         echo "  Installed superpowers plugin"
+        echo "  DEBUG: plugins in json: $(cat "$PLUGIN_JSON" 2>/dev/null | grep -o '@.*marketplace' | wc -l)"
       else
         echo "CSB_WARN:superpowers plugin install failed"
       fi
 
-      # Verify plugins are properly installed
-      if claude plugin install beads@beads-marketplace 2>&1 | grep -q "Successfully\|already installed"; then
+      # Brief pause to ensure all async writes complete
+      sleep 1
+      sync
+
+      # Verify plugins are installed
+      if grep -q "beads@beads-marketplace" "$PLUGIN_JSON" 2>/dev/null && \
+         grep -q "superpowers@superpowers-marketplace" "$PLUGIN_JSON" 2>/dev/null; then
         touch ~/.csb-plugins-configured
+        echo "  DEBUG: Both plugins verified in $PLUGIN_JSON"
+      else
+        echo "  DEBUG: Plugin verification FAILED"
+        echo "  DEBUG: File contents:"
+        cat "$PLUGIN_JSON" 2>/dev/null || echo "  DEBUG: File not found"
       fi
 
       # Show setup reminder on first login with plugin commands inline (fallback if auto-install fails)
