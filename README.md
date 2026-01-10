@@ -21,11 +21,27 @@ brew install lima
 
 ## Installation
 
-Clone this repo and add `csb` to your PATH:
+### System Install (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/sbmaker-2.git
-export PATH="$PATH:$(pwd)/sbmaker-2/csb"
+git clone https://github.com/danyelf/claude-sandbox-maker.git
+cd claude-sandbox-maker
+./install.sh
+```
+
+This installs:
+- `/usr/local/bin/csb` - the CLI
+- `/usr/local/share/csb/` - support files (template, config)
+
+To uninstall: `./install.sh --uninstall`
+
+### Development Install
+
+For hacking on csb itself, add the repo to your PATH:
+
+```bash
+git clone https://github.com/danyelf/claude-sandbox-maker.git
+export PATH="$PATH:$(pwd)/claude-sandbox-maker/csb"
 ```
 
 ## Quick Start
