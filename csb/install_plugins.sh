@@ -8,7 +8,8 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 
 echo "Installing Claude Code plugins..."
 
-# Initialize Claude first
+# Initialize Claude (required for plugin commands to work)
+# Exits on failure due to set -e
 echo "  Initializing Claude..."
 claude --version
 

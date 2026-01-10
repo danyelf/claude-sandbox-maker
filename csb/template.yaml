@@ -126,18 +126,20 @@ provision:
         echo "  Installing Claude plugins (first run)..."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-        # Initialize Claude
-        claude --version > /dev/null 2>&1
+        # Initialize Claude (required for plugin commands to work)
+        if ! claude --version > /dev/null 2>&1; then
+          echo "  ERROR: Claude initialization failed, will retry on next login"
+        else
+          # Add marketplaces and install plugins
+          claude plugin marketplace add steveyegge/beads 2>/dev/null || true
+          claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
+          claude plugin install beads@beads-marketplace 2>&1 || true
+          claude plugin install superpowers@superpowers-marketplace 2>&1 || true
 
-        # Add marketplaces and install plugins
-        claude plugin marketplace add steveyegge/beads 2>/dev/null || true
-        claude plugin marketplace add obra/superpowers-marketplace 2>/dev/null || true
-        claude plugin install beads@beads-marketplace 2>&1 || true
-        claude plugin install superpowers@superpowers-marketplace 2>&1 || true
-
-        # Mark as done
-        touch ~/.csb-plugins-configured
-        echo "  Done! Plugins installed."
+          # Mark as done
+          touch ~/.csb-plugins-configured
+          echo "  Done! Plugins installed."
+        fi
         echo ""
       fi
       EOFRC
