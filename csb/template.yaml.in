@@ -27,6 +27,12 @@ ssh:
   localPort: 0  # Auto-assign port
   forwardAgent: true
 
+# Port forwarding for dev servers (5173-5273 covers ~100 parallel agents)
+portForwards:
+  - guestPortRange: [5173, 5273]
+  - guestPortRange: [3000, 3010]
+  - guestPortRange: [8080, 8090]
+
 # Containerd disabled - we don't need containers
 containerd:
   system: false
