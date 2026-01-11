@@ -12,8 +12,9 @@ images:
     arch: "aarch64"
 
 # VM resources (can be overridden via limactl edit)
-cpus: 4
-memory: "4GiB"
+# Sized for 3 parallel Claude agents
+cpus: 6
+memory: "8GiB"
 disk: "30GiB"
 
 # Use a consistent username for all csb VMs (not host username)
@@ -80,6 +81,31 @@ provision:
       apt-get clean
       rm -rf /var/lib/apt/lists/*
 
+  - mode: system
+    script: |
+      #!/bin/bash
+      # Configure swap as safety net for memory-intensive workloads
+      set -eux -o pipefail
+
+      echo "CSB_PROGRESS:Configuring swap"
+
+      # Create 4GB swap file if not exists
+      if [ ! -f /swapfile ]; then
+        fallocate -l 4G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+      fi
+
+      # Enable swap
+      swapon /swapfile 2>/dev/null || true
+
+      # Make persistent
+      if ! grep -q swapfile /etc/fstab; then
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+      fi
+
+      echo "Swap configured: 4GB"
+
   - mode: user
     script: |
       #!/bin/bash
@@ -132,10 +158,21 @@ provision:
       # Skip plugin installation during provisioning - it doesn't persist properly
       # Instead, install on first login via .bashrc
       echo "CSB_PROGRESS:Configuring plugin installer"
-      
+
+      # Fix for Claude Code sub-agent JSON serialization freeze (issue #4580)
+      cat >> ~/.bashrc << 'EOFMEM'
+
+# Memory tuning for Claude Code sub-agents (fixes 100% CPU freeze)
+# See: https://github.com/anthropics/claude-code/issues/4580
+export MALLOC_TRIM_THRESHOLD_=-1
+export MALLOC_MMAP_THRESHOLD_=134217728
+export MALLOC_ARENA_MAX=4
+export NODE_OPTIONS="--max-old-space-size=4096"
+EOFMEM
+
       # Auto-install plugins on first interactive login
       cat >> ~/.bashrc << 'EOFRC'
-      
+
       # CSB first-run plugin installation
       if [ ! -f ~/.csb-plugins-configured ] && [ -t 0 ]; then
         echo ""
