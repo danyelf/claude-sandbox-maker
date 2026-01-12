@@ -7,6 +7,7 @@ set -e
 VERSION="0.1.0"
 CSB_DIR="${HOME}/.csb"
 CSB_FILE=".csb"
+WORKSPACE_CSB_DIR="/workspace/.csb"
 VERBOSE="${CSB_VERBOSE:-false}"
 SLOW_PROGRESS="${CSB_SLOW_PROGRESS:-false}"
 
@@ -608,6 +609,19 @@ ssh_to_https_url() {
     fi
 }
 
+# Set up agent status directory in workspace
+# Creates /workspace/.csb/<agent-name>/ for agent status files
+setup_status_dir() {
+    local vm_name="$1"
+    local agent_name="$2"
+    local status_dir="${WORKSPACE_CSB_DIR}/${agent_name}"
+
+    # Create directory owned by the agent user
+    limactl shell --workdir / "${vm_name}" -- sudo mkdir -p "${status_dir}"
+    limactl shell --workdir / "${vm_name}" -- sudo chown "${agent_name}:${agent_name}" "${status_dir}"
+    limactl shell --workdir / "${vm_name}" -- sudo chmod 755 "${status_dir}"
+}
+
 # Get agent slot number for consistent port assignment
 # Extracts trailing number from name, or derives from UID
 get_agent_slot() {
@@ -647,6 +661,9 @@ start_agent() {
 
     # Secure home directory (only this user can access)
     limactl shell --workdir / "${vm_name}" -- sudo chmod 700 "/home/${agent_name}"
+
+    # Set up status directory for this agent
+    setup_status_dir "${vm_name}" "${agent_name}"
 
     # Get agent slot for consistent port mapping
     local agent_slot=$(get_agent_slot "${vm_name}" "${agent_name}")
