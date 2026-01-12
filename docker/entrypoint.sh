@@ -10,6 +10,10 @@ MAX_PUSH_RETRIES=3
 PUSH_RETRY_DELAY=5
 MAX_IDLE_CYCLES=10  # Exit after this many cycles with no work
 
+# Status directory for agent coordination
+CSB_DIR="/workspace/.csb"
+AGENT_STATUS_DIR="${CSB_DIR}/${AGENT_ID}"
+
 # Failure context (set by finalize_work for cleanup to use)
 FAILURE_REASON=""
 FAILURE_DETAILS=""
@@ -20,6 +24,12 @@ log() {
 
 error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] ERROR: $*" >&2
+}
+
+# Set up status directory for this agent
+setup_status_dir() {
+    mkdir -p "$AGENT_STATUS_DIR"
+    log "Status directory: $AGENT_STATUS_DIR"
 }
 
 # Get list of conflicting files during a failed rebase/merge
@@ -311,6 +321,7 @@ interactive_mode() {
 main() {
     log "Starting agent in $AGENT_MODE mode"
 
+    setup_status_dir
     setup_git
 
     case "$AGENT_MODE" in
