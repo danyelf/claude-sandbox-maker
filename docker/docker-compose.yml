@@ -40,6 +40,8 @@ services:
             git clone "$${GIT_REPO_URL}" /workspace/main
           fi
         fi
+        # Fix permissions for agent user (UID 1001)
+        chown -R 1001:1001 /workspace
         echo "Init complete"
 
   # Agent template - use YAML anchors for DRY configuration
@@ -52,7 +54,7 @@ services:
     working_dir: /workspace/main
     environment:
       - AGENT_ID=agent1
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
     depends_on:
@@ -68,7 +70,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent2
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -76,7 +78,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent3
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -84,7 +86,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent4
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -94,7 +96,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=interactive
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=interactive
     ports:

@@ -11,7 +11,7 @@ PUSH_RETRY_DELAY=5
 MAX_IDLE_CYCLES=10  # Exit after this many cycles with no work
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] $*"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] $*" >&2
 }
 
 error() {
@@ -45,13 +45,13 @@ claim_task() {
 
     log "Attempting to claim task: $task_id"
 
-    # Try to claim it
-    if bd update "$task_id" --status in_progress --assignee "$AGENT_ID" 2>/dev/null; then
-        bd sync 2>/dev/null || true
+    # Try to claim it (redirect all output to avoid capture)
+    if bd update "$task_id" --status in_progress --assignee "$AGENT_ID" >/dev/null 2>&1; then
+        bd sync >/dev/null 2>&1 || true
 
         # Verify we got it (another agent might have claimed it)
         local assignee
-        assignee=$(bd show "$task_id" --json 2>/dev/null | jq -r '.assignee // empty')
+        assignee=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].assignee // empty')
 
         if [ "$assignee" = "$AGENT_ID" ]; then
             log "Successfully claimed task: $task_id"
@@ -73,15 +73,15 @@ setup_worktree() {
     local branch_name="${AGENT_ID}/${task_id}"
 
     cd /workspace/main
-    git fetch origin main
+    git fetch origin main >/dev/null 2>&1
 
     # Clean up any existing worktree
     if [ -d "$worktree_path" ]; then
-        git worktree remove "$worktree_path" --force 2>/dev/null || true
+        git worktree remove "$worktree_path" --force >/dev/null 2>&1 || true
     fi
 
-    # Create fresh worktree
-    git worktree add "$worktree_path" -b "$branch_name" origin/main
+    # Create fresh worktree (redirect git output to avoid capture)
+    git worktree add "$worktree_path" -b "$branch_name" origin/main >/dev/null 2>&1
 
     log "Created worktree at $worktree_path on branch $branch_name"
     echo "$worktree_path"
@@ -96,8 +96,8 @@ do_work() {
 
     # Get task details for the prompt
     local task_title task_desc
-    task_title=$(bd show "$task_id" --json 2>/dev/null | jq -r '.title // "Unknown task"')
-    task_desc=$(bd show "$task_id" --json 2>/dev/null | jq -r '.description // ""')
+    task_title=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].title // "Unknown task"')
+    task_desc=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].description // ""')
 
     log "Starting work on: $task_title"
 
