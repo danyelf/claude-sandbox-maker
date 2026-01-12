@@ -10,12 +10,33 @@ MAX_PUSH_RETRIES=3
 PUSH_RETRY_DELAY=5
 MAX_IDLE_CYCLES=10  # Exit after this many cycles with no work
 
+# Failure context (set by finalize_work for cleanup to use)
+FAILURE_REASON=""
+FAILURE_DETAILS=""
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] $*" >&2
 }
 
 error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$AGENT_ID] ERROR: $*" >&2
+}
+
+# Get list of conflicting files during a failed rebase/merge
+get_conflict_files() {
+    git diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ', ' | sed 's/,$//'
+}
+
+# Get a summary of the conflict situation
+get_conflict_summary() {
+    local conflict_files
+    conflict_files=$(get_conflict_files)
+
+    if [ -n "$conflict_files" ]; then
+        echo "Conflicting files: $conflict_files"
+    else
+        echo "Unable to determine conflicting files"
+    fi
 }
 
 # Configure git identity for this agent
@@ -116,6 +137,8 @@ If you cannot complete the task, explain why in a comment."
         return 0
     else
         error "Claude failed on $task_id"
+        FAILURE_REASON="claude_failed"
+        FAILURE_DETAILS="Claude Code failed to complete the task. This may require manual intervention or the task may need to be broken down into smaller pieces."
         return 1
     fi
 }
@@ -133,7 +156,14 @@ finalize_work() {
     git fetch origin main
 
     if ! git rebase origin/main; then
+        local conflict_summary
+        conflict_summary=$(get_conflict_summary)
         error "Rebase failed - conflicts detected"
+        error "$conflict_summary"
+
+        FAILURE_REASON="merge_conflict"
+        FAILURE_DETAILS="Rebase onto origin/main failed. $conflict_summary. Agent cannot automatically resolve these conflicts."
+
         git rebase --abort 2>/dev/null || true
         return 1
     fi
@@ -143,6 +173,8 @@ finalize_work() {
         log "Running tests..."
         if ! npm test 2>&1; then
             error "Tests failed after rebase"
+            FAILURE_REASON="test_failure"
+            FAILURE_DETAILS="Tests failed after rebasing onto origin/main. The changes may have introduced breaking behavior or conflicted with recent changes in main."
             return 1
         fi
     fi
@@ -156,6 +188,8 @@ finalize_work() {
     log "Merging $branch_name to main..."
     if ! git merge --ff-only "$branch_name"; then
         error "Fast-forward merge failed"
+        FAILURE_REASON="merge_failed"
+        FAILURE_DETAILS="Fast-forward merge of $branch_name to main failed. Main branch has diverged since the rebase. This may indicate a race condition with another agent."
         return 1
     fi
 
@@ -178,6 +212,8 @@ finalize_work() {
     done
 
     error "Push failed after $MAX_PUSH_RETRIES attempts"
+    FAILURE_REASON="push_failed"
+    FAILURE_DETAILS="Push to origin/main failed after $MAX_PUSH_RETRIES attempts with ${PUSH_RETRY_DELAY}s delays between retries. This may indicate persistent conflicts with other agents or remote access issues."
     return 1
 }
 
@@ -202,9 +238,22 @@ cleanup() {
         log "Closing task $task_id"
         bd close "$task_id" 2>/dev/null || true
     else
-        log "Marking task $task_id as blocked"
-        bd comments add "$task_id" "Agent $AGENT_ID encountered an error and could not complete this task" 2>/dev/null || true
+        log "Marking task $task_id as blocked (reason: ${FAILURE_REASON:-unknown})"
+
+        # Build detailed comment based on failure reason
+        local comment
+        if [ -n "$FAILURE_DETAILS" ]; then
+            comment="[Agent $AGENT_ID] $FAILURE_DETAILS"
+        else
+            comment="[Agent $AGENT_ID] Encountered an error and could not complete this task."
+        fi
+
+        bd comments add "$task_id" "$comment" 2>/dev/null || true
         bd update "$task_id" --status blocked 2>/dev/null || true
+
+        # Reset failure context for next task
+        FAILURE_REASON=""
+        FAILURE_DETAILS=""
     fi
 
     bd sync 2>/dev/null || true
@@ -234,6 +283,8 @@ agent_loop() {
                 cleanup "$task_id" "$worktree_path" "$success"
             else
                 error "Failed to set up worktree for $task_id"
+                FAILURE_REASON="worktree_failed"
+                FAILURE_DETAILS="Failed to set up git worktree for this task. This may indicate git repository issues or disk space problems."
                 cleanup "$task_id" "" "false"
             fi
         else
