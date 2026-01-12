@@ -1,118 +1,110 @@
-# Multi-Agent Docker Compose Configuration
-# Runs multiple Claude agents with shared workspace for beads coordination
+# Multi-Agent Docker Infrastructure
+# See docs/plans/2026-01-11-multi-agent-workflow-design.md for design details
+#
+# Usage:
+#   export GITHUB_TOKEN=ghp_xxx
+#   export CLAUDE_OAUTH_TOKEN=xxx  # or ANTHROPIC_API_KEY
+#   export GIT_REPO_URL=https://github.com/owner/repo.git
+#   cd docker
+#   docker compose up init        # Clone repo first
+#   docker compose up agent1      # Start one agent
+#   docker compose up             # Start all agents
+#   docker compose --profile interactive up interactive  # Interactive mode
 
 volumes:
   workspace:
-    driver: local
+    name: agent-workspace
 
 services:
-  # Initialize the workspace by cloning the repository
+  # Init service: clones the repo into the shared workspace
   init:
-    image: alpine/git
+    image: alpine:latest
     volumes:
       - workspace:/workspace
     environment:
-      - GITHUB_TOKEN
-      - REPO_URL=${REPO_URL:-https://github.com/user/repo.git}
-    command: >
-      sh -c '
-        if [ ! -d /workspace/main/.git ]; then
-          echo "Cloning repository..."
-          git clone "https://${GITHUB_TOKEN}@${REPO_URL#https://}" /workspace/main
-          cd /workspace/main
-          git config credential.helper store
-          echo "Repository cloned successfully"
+      - GIT_REPO_URL=${GIT_REPO_URL}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache git
+        if [ -d /workspace/main/.git ]; then
+          echo "Repo already cloned, updating..."
+          cd /workspace/main && git fetch origin main && git reset --hard origin/main
         else
-          echo "Repository already exists, fetching latest..."
-          cd /workspace/main
-          git fetch origin
-          echo "Fetch complete"
+          echo "Cloning repo..."
+          if [ -n "$${GITHUB_TOKEN}" ]; then
+            git clone "https://$${GITHUB_TOKEN}@$${GIT_REPO_URL#https://}" /workspace/main
+          else
+            git clone "$${GIT_REPO_URL}" /workspace/main
+          fi
         fi
-      '
-    # Init runs once and exits
+        echo "Init complete"
 
-  # Agent 1
-  agent1:
-    build: .
+  # Agent template - use YAML anchors for DRY configuration
+  agent1: &agent
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - workspace:/workspace
     working_dir: /workspace/main
     environment:
       - AGENT_ID=agent1
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
     depends_on:
       init:
         condition: service_completed_successfully
-    # No dangerous Docker options - agents are isolated to /workspace only
-    # DO NOT add: privileged, docker.sock mount, network_mode: host, pid: host
-
-  # Agent 2
-  agent2:
-    build: .
-    volumes:
-      - workspace:/workspace
-    working_dir: /workspace/main
-    environment:
-      - AGENT_ID=agent2
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
-      - AGENT_MODE=${AGENT_MODE:-autonomous}
-    depends_on:
-      init:
-        condition: service_completed_successfully
-
-  # Agent 3
-  agent3:
-    build: .
-    volumes:
-      - workspace:/workspace
-    working_dir: /workspace/main
-    environment:
-      - AGENT_ID=agent3
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
-      - AGENT_MODE=${AGENT_MODE:-autonomous}
-    depends_on:
-      init:
-        condition: service_completed_successfully
-
-  # Agent 4
-  agent4:
-    build: .
-    volumes:
-      - workspace:/workspace
-    working_dir: /workspace/main
-    environment:
-      - AGENT_ID=agent4
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
-      - AGENT_MODE=${AGENT_MODE:-autonomous}
-    depends_on:
-      init:
-        condition: service_completed_successfully
-
-  # Interactive agent with port mapping for dev servers
-  # Use: docker compose up interactive
-  interactive:
-    build: .
-    volumes:
-      - workspace:/workspace
-    working_dir: /workspace/main
-    ports:
-      - "5180:5173"  # Dev server
-      - "3000:3000"  # Alt dev server
-      - "8080:8080"  # API server
-    environment:
-      - AGENT_ID=interactive
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
-      - AGENT_MODE=interactive
-    depends_on:
-      init:
-        condition: service_completed_successfully
+    # Safe config: no privileged access, no docker socket, no host network
+    privileged: false
+    network_mode: bridge
     stdin_open: true
     tty: true
+
+  agent2:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent2
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AGENT_MODE=${AGENT_MODE:-autonomous}
+
+  agent3:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent3
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AGENT_MODE=${AGENT_MODE:-autonomous}
+
+  agent4:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent4
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AGENT_MODE=${AGENT_MODE:-autonomous}
+
+  # Interactive agent with port mapping for dev server access
+  # Usage: docker compose --profile interactive run --service-ports interactive
+  interactive:
+    <<: *agent
+    environment:
+      - AGENT_ID=interactive
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AGENT_MODE=interactive
+    ports:
+      - "5181:5173"  # Vite dev server
+      - "3000:3000"  # Alt dev server
+      - "8080:8080"  # API server
     profiles:
       - interactive
