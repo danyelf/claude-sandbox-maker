@@ -348,6 +348,9 @@ cleanup() {
 
     cd /workspace/main
 
+    # Clear any pending approval request
+    clear_approval_request
+
     # Remove worktree
     if [ -d "$worktree_path" ]; then
         git worktree remove "$worktree_path" --force 2>/dev/null || true
