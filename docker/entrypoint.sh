@@ -65,6 +65,29 @@ clear_output_log() {
     : > "$AGENT_STATUS_DIR/output.log"
 }
 
+# Get the task type from beads
+# Usage: get_task_type <task_id>
+# Returns: feature, bug, chore, refactor, task, epic, etc.
+get_task_type() {
+    local task_id="$1"
+    bd show "$task_id" --json 2>/dev/null | jq -r '.[0].issue_type // "unknown"'
+}
+
+# Check if a task type requires human approval before merging
+# Usage: requires_approval <task_type>
+# Returns: 0 (true) for features/bugs, 1 (false) for chores/refactors
+requires_approval() {
+    local task_type="$1"
+    case "$task_type" in
+        feature|bug)
+            return 0  # Requires approval
+            ;;
+        *)
+            return 1  # Auto-merge allowed
+            ;;
+    esac
+}
+
 # Get list of conflicting files during a failed rebase/merge
 get_conflict_files() {
     git diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ', ' | sed 's/,$//'
