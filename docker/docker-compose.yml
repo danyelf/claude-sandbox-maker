@@ -3,7 +3,7 @@
 #
 # Usage:
 #   export GITHUB_TOKEN=ghp_xxx
-#   export CLAUDE_OAUTH_TOKEN=xxx  # or ANTHROPIC_API_KEY
+#   export CLAUDE_OAUTH_TOKEN=xxx
 #   export GIT_REPO_URL=https://github.com/owner/repo.git
 #   cd docker
 #   docker compose up init        # Clone repo first
@@ -52,8 +52,7 @@ services:
     working_dir: /workspace/main
     environment:
       - AGENT_ID=agent1
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
     depends_on:
@@ -69,8 +68,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent2
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -78,8 +76,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent3
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -87,8 +84,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=agent4
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=${AGENT_MODE:-autonomous}
 
@@ -98,8 +94,7 @@ services:
     <<: *agent
     environment:
       - AGENT_ID=interactive
-      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - AGENT_MODE=interactive
     ports:

@@ -20,8 +20,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code and beads CLI globally
-RUN npm install -g @anthropic-ai/claude-code beads-cli
+# Install Claude Code globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install beads CLI from GitHub releases
+ARG BEADS_VERSION=0.47.0
+ARG TARGETARCH
+RUN curl -fsSL "https://github.com/steveyegge/beads/releases/download/v${BEADS_VERSION}/beads_${BEADS_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin bd \
+    && chmod +x /usr/local/bin/bd
 
 # Configure git (agents will use GITHUB_TOKEN for auth)
 RUN git config --global init.defaultBranch main \
