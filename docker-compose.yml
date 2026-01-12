@@ -1,0 +1,95 @@
+# Multi-Agent Docker Infrastructure
+# See docs/plans/2026-01-11-multi-agent-workflow-design.md for design details
+#
+# Usage:
+#   export GITHUB_TOKEN=ghp_xxx
+#   export CLAUDE_OAUTH_TOKEN=xxx  # or ANTHROPIC_API_KEY
+#   export GIT_REPO_URL=https://github.com/owner/repo.git
+#   docker compose up init        # Clone repo first
+#   docker compose up agent1      # Start one agent
+#   docker compose up             # Start all agents
+
+volumes:
+  workspace:
+    name: agent-workspace
+
+services:
+  # Init service: clones the repo into the shared workspace
+  init:
+    image: alpine/git
+    volumes:
+      - workspace:/workspace
+    environment:
+      - GIT_REPO_URL=${GIT_REPO_URL}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    command: >
+      sh -c '
+        if [ -d /workspace/main/.git ]; then
+          echo "Repo already cloned, updating..."
+          cd /workspace/main && git fetch origin main && git reset --hard origin/main
+        else
+          echo "Cloning repo..."
+          git clone "https://$${GITHUB_TOKEN}@$${GIT_REPO_URL#https://}" /workspace/main
+        fi
+        echo "Init complete"
+      '
+
+  # Agent template - use YAML anchors for DRY configuration
+  agent1: &agent
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - workspace:/workspace
+    working_dir: /workspace/main
+    environment:
+      - AGENT_ID=agent1
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Safe config: no privileged access, no docker socket, no host network
+    # (These are defaults, but explicit for security documentation)
+    privileged: false
+    network_mode: bridge
+    stdin_open: true
+    tty: true
+
+  agent2:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent2
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+  agent3:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent3
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+  agent4:
+    <<: *agent
+    environment:
+      - AGENT_ID=agent4
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+  # Interactive agent with port mapping for dev server access
+  # Usage: docker compose run --service-ports interactive
+  interactive:
+    <<: *agent
+    environment:
+      - AGENT_ID=interactive
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MODE=interactive
+    ports:
+      - "5181:5173"  # Dev server port mapping
