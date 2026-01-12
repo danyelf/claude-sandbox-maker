@@ -512,10 +512,111 @@ agent_loop() {
     done
 }
 
-# Interactive mode - just start a shell
+# Interactive agent loop - works on one task with approval gates
+# Unlike agent_loop(), this processes a single task and exits
+interactive_agent_loop() {
+    log "Looking for work..."
+    write_status "idle"
+
+    local task_id
+    if ! task_id=$(claim_task); then
+        log "No work available"
+        write_status "idle"
+        return 0
+    fi
+
+    local worktree_path
+    if ! worktree_path=$(setup_worktree "$task_id"); then
+        error "Failed to set up worktree for $task_id"
+        FAILURE_REASON="worktree_failed"
+        FAILURE_DETAILS="Failed to set up git worktree for this task. This may indicate git repository issues or disk space problems."
+        cleanup "$task_id" "" "false"
+        return 1
+    fi
+
+    local success="false"
+
+    # Do the work (Claude implements the task)
+    if ! do_work "$task_id" "$worktree_path"; then
+        cleanup "$task_id" "$worktree_path" "$success"
+        return 1
+    fi
+
+    # Check task type to determine if approval is needed
+    local task_type
+    task_type=$(get_task_type "$task_id")
+    log "Task type: $task_type"
+
+    if requires_approval "$task_type"; then
+        # Features and bugs require human approval
+        log "Task requires approval (type: $task_type)"
+        write_status "needs_approval" "$task_id"
+        write_approval_request "$task_type"
+
+        # Wait for human response
+        local response
+        response=$(wait_for_approval)
+        clear_approval_request
+
+        if [ "$response" = "approved" ]; then
+            log "Changes approved, proceeding with merge"
+            write_status "working" "$task_id"
+
+            if continue_with_merge "$task_id" "$worktree_path"; then
+                success="true"
+            fi
+        else
+            # Response is feedback - extract it from the approval directory
+            local feedback_file="$AGENT_STATUS_DIR/approval/feedback"
+            local feedback=""
+            if [ -f "$feedback_file" ]; then
+                feedback=$(cat "$feedback_file")
+            else
+                feedback="$response"
+            fi
+
+            log "Changes rejected, applying feedback"
+            write_status "working" "$task_id"
+
+            if continue_with_feedback "$task_id" "$worktree_path" "$feedback"; then
+                # After applying feedback, need approval again
+                # Recursively wait for approval (simplified: just re-request)
+                write_status "needs_approval" "$task_id"
+                write_approval_request "$task_type"
+
+                response=$(wait_for_approval)
+                clear_approval_request
+
+                if [ "$response" = "approved" ]; then
+                    write_status "working" "$task_id"
+                    if continue_with_merge "$task_id" "$worktree_path"; then
+                        success="true"
+                    fi
+                fi
+            fi
+        fi
+    else
+        # Chores and refactors auto-merge
+        log "Task auto-merging (type: $task_type)"
+
+        if finalize_work "$task_id" "$worktree_path"; then
+            success="true"
+        fi
+    fi
+
+    cleanup "$task_id" "$worktree_path" "$success"
+
+    if [ "$success" = "true" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Interactive mode - run the interactive agent loop
 interactive_mode() {
     log "Starting interactive mode"
-    exec /bin/bash
+    interactive_agent_loop
 }
 
 # Main
