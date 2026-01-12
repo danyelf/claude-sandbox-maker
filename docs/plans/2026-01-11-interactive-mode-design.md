@@ -147,22 +147,65 @@ In `docker-compose.yml`, ports are already mapped (5173-5273). We need to:
 2. Update agent `.profile` to use assigned port
 3. Show port in dashboard UI
 
+## Architecture
+
+**Two independent components:**
+
+1. **Agent loop** (runs in Docker/Lima) - Claims tasks, runs Claude, writes status files, waits for approval
+2. **Dashboard** (runs on host Mac) - Reads status files, shows TUI, writes approval responses
+
+**Communication:** Shared files in `/workspace/.csb/` (mounted volume visible to both).
+
+**Session continuity:** Agents use `claude --continue` to resume conversations. No persistent Claude process needed - the conversation state persists in Claude's session files.
+
 ## Focus Mode (Chat)
 
-When you focus on an agent, the dashboard is replaced by a direct chat interface with that agent. This is essentially attaching to the agent's Claude Code session.
+When you focus on an agent, you attach to its tmux session and can resume its Claude conversation.
 
 **Entering focus:**
 - Select agent, press Enter, choose "Focus"
-- Or press `f` as a shortcut when agent is selected
+- Dashboard suspends, runs `csb attach agentN`
+- You're now in the agent's tmux session (shell prompt)
+- Run `claude --continue` to enter the conversation
 
 **In focus mode:**
-- Full terminal is the agent's Claude Code session
-- You can chat, review code, give instructions
-- Agent has full context of what it was working on
+- Full conversation context preserved from agent's work
+- You can review what happened, chat, give instructions
+- Agent loop is paused (waiting for approval or between tasks)
 
 **Exiting focus:**
-- Press `Ctrl+B d` (tmux detach) to return to dashboard
-- Or type `/dashboard` in the chat
+- Exit Claude (Ctrl+C or `/exit`)
+- Detach from tmux (`Ctrl+B d`)
+- Dashboard resumes
+
+## Agent Loop (Interactive Mode)
+
+```bash
+while true; do
+  task=$(claim_next_task)
+  task_type=$(get_task_type "$task")
+
+  write_status "working" "$task"
+  claude "Work on $task. Stop before merging."
+
+  if [[ "$task_type" == "feature" || "$task_type" == "bug" ]]; then
+    write_status "needs_approval" "$task"
+    write_approval_request  # diff, commit msg, test results
+    wait_for_approval       # poll for response file
+
+    if [[ "$(cat approval_response)" == "approved" ]]; then
+      claude --continue "Merge approved. Proceed with merge and push."
+    else
+      claude --continue "Changes requested. Review the feedback."
+      continue  # loop back, don't merge
+    fi
+  fi
+
+  # Chores/refactors auto-merge
+  claude --continue "Proceed with merge and push."
+  write_status "idle"
+done
+```
 
 ## CLI Interface
 
@@ -180,40 +223,47 @@ csb start agent1 agent2 --mode interactive
 
 ## Implementation Approach
 
-### Phase 1: Mode Flag and Approval Gate
+### Phase 1: Agent-Side Approval Gate
 
-1. Add `--mode` flag to `csb start` command
-2. Pass `AGENT_MODE=interactive` to docker-compose
-3. Modify `entrypoint.sh` to check task type before merge
-4. Add approval request mechanism (write to shared file/socket)
+Modify `entrypoint.sh` to support interactive mode:
+1. Add `--mode` flag to `csb start`, pass `AGENT_MODE=interactive` to docker-compose
+2. Create `/workspace/.csb/agentN/` directory structure on startup
+3. Write status files (`status`, `task`, `output.log`) as agent works
+4. Check task type before merge - features/bugs write approval request and wait
+5. Use `claude --continue` pattern for multi-step conversations
 
-### Phase 2: Basic Dashboard
+### Phase 2: Basic Dashboard (Host-Side)
 
-1. Create dashboard using Python + Textual
-2. Poll agent status from shared state files
-3. Display agent panels and task bar
-4. Implement keyboard navigation
+Standalone Python + Textual app that runs on host Mac:
+1. Create `csb-dashboard` script (or `csb dashboard` subcommand)
+2. Poll `/workspace/.csb/*/status` files every ~1s
+3. Display agent panels with status, task, recent output
+4. Display task bar from `bd list` output
+5. Implement keyboard navigation (arrows, tab, enter)
 
 ### Phase 3: Approval UI
 
-1. Detect when agent needs approval
-2. Show approval dialog with diff summary
-3. Handle approve/reject actions
-4. Signal agent to proceed or revise
+Add approval handling to dashboard:
+1. Detect `needs_approval` status, show approval dialog
+2. Read approval request (diff summary, commit msg, test results)
+3. Handle approve/reject keypresses
+4. Write approval response file for agent to read
 
 ### Phase 4: Focus Mode
 
-1. Use tmux for session management
-2. Each agent runs in a tmux session
-3. Focus attaches to agent's tmux session
-4. Detach returns to dashboard
+Connect dashboard to agent sessions:
+1. On "Focus" action, call `app.suspend()` in Textual
+2. Spawn `csb attach agentN` subprocess
+3. User is in tmux session, can run `claude --continue`
+4. On subprocess exit, resume Textual dashboard
 
 ### Phase 5: Port Mapping
 
-1. Assign ports based on agent number
-2. Set PORT env var in agent container
-3. Display port in dashboard UI
-4. Verify Lima port forwarding works
+Ensure dev server access works:
+1. Assign fixed ports: agent1→5181, agent2→5182, etc.
+2. Set `PORT` env var in docker-compose per agent
+3. Show port in dashboard agent panel
+4. Verify Lima forwards ports correctly from VM to host
 
 ## State Management
 
@@ -237,22 +287,31 @@ Agents communicate status via shared files in `/workspace/.csb/`:
 
 ## Technology Decisions
 
-1. **Dashboard implementation:** Python + Textual
+1. **Dashboard implementation:** Python + Textual (host-side)
+   - Runs on Mac, not in Docker - simpler, native tmux access
    - Full TUI framework built on Rich
    - Handles live updates, keyboard navigation, and panel layouts well
-   - Trade-off: external dependency, but well-maintained and purpose-built for this
+   - Reads shared files from Lima-mounted `/workspace/.csb/`
 
-2. **Focus mode session management:** tmux
-   - Each agent runs in its own tmux session
-   - Dashboard runs in a separate tmux window
-   - Focus = `tmux attach-session -t agentN`
-   - Detach (`Ctrl+B d`) returns to dashboard
-   - Battle-tested, maps perfectly to focus/return model
+2. **Agent-dashboard communication:** Shared files
+   - Simple, debuggable (just `cat` the files)
+   - Works across Docker/Lima boundary via mounted volume
+   - ~1s polling latency is acceptable for dashboard
 
-3. **Agent output streaming:** Last N lines, no timestamps
+3. **Session continuity:** `claude --continue`
+   - No persistent Claude process needed
+   - Conversation state persists in Claude's session files
+   - Human can resume same conversation via `claude --continue`
+
+4. **Focus mode:** tmux + subprocess
+   - Agents run in tmux sessions (via existing `csb attach`)
+   - Dashboard suspends Textual, spawns `csb attach agentN`
+   - User runs `claude --continue` in the attached session
+   - Detach returns to dashboard
+
+5. **Agent output streaming:** Last N lines, no timestamps
    - Simple tail of recent output (3-4 lines per panel)
    - Start simple, add timestamps later if needed
-   - YAGNI: avoid complexity until proven necessary
 
 ## Success Criteria
 
