@@ -285,6 +285,72 @@ If you cannot complete the task, explain why in a comment."
     fi
 }
 
+# Resume Claude session after approval to proceed with merge and push
+# Usage: continue_with_merge <task_id> <worktree_path>
+continue_with_merge() {
+    local task_id="$1"
+    local worktree_path="$2"
+
+    cd "$worktree_path"
+
+    tee_output "Resuming Claude to merge approved changes for $task_id"
+
+    local prompt="Your changes have been APPROVED. Please proceed with:
+1. Rebase onto origin/main (git fetch origin main && git rebase origin/main)
+2. Merge to main using fast-forward only
+3. Push to origin
+
+If you encounter conflicts during rebase, abort and report the issue."
+
+    local exit_code=0
+    if claude --dangerously-skip-permissions --continue -p "$prompt" 2>&1 | tee -a "$AGENT_STATUS_DIR/output.log"; then
+        tee_output "Claude completed merge for $task_id"
+        return 0
+    else
+        exit_code=$?
+        tee_output "ERROR: Claude failed to merge $task_id"
+        FAILURE_REASON="merge_failed"
+        FAILURE_DETAILS="Claude Code failed to complete the merge after approval. Manual intervention may be required."
+        return $exit_code
+    fi
+}
+
+# Resume Claude session after rejection with feedback to make changes
+# Usage: continue_with_feedback <task_id> <worktree_path> <feedback>
+continue_with_feedback() {
+    local task_id="$1"
+    local worktree_path="$2"
+    local feedback="$3"
+
+    cd "$worktree_path"
+
+    tee_output "Resuming Claude with feedback for $task_id"
+
+    local prompt="Your changes were REJECTED with the following feedback:
+
+$feedback
+
+Please:
+1. Review the feedback carefully
+2. Make the requested changes
+3. Commit your updates with a descriptive message
+4. STOP - do not merge or push
+
+Wait for approval again after making changes."
+
+    local exit_code=0
+    if claude --dangerously-skip-permissions --continue -p "$prompt" 2>&1 | tee -a "$AGENT_STATUS_DIR/output.log"; then
+        tee_output "Claude completed revisions for $task_id"
+        return 0
+    else
+        exit_code=$?
+        tee_output "ERROR: Claude failed to apply feedback for $task_id"
+        FAILURE_REASON="revision_failed"
+        FAILURE_DETAILS="Claude Code failed to apply the requested changes from feedback. The task may need manual intervention."
+        return $exit_code
+    fi
+}
+
 # Rebase, test, merge, and push
 finalize_work() {
     local task_id="$1"
