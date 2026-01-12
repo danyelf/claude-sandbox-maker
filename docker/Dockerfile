@@ -40,11 +40,12 @@ RUN useradd -m -s /bin/bash -u 1001 agent \
 USER agent
 RUN git config --global init.defaultBranch main \
     && git config --global credential.helper store \
-    && git config --global safe.directory /workspace/main \
-    && git config --global safe.directory /workspace/agent1 \
-    && git config --global safe.directory /workspace/agent2 \
-    && git config --global safe.directory /workspace/agent3 \
-    && git config --global safe.directory /workspace/agent4
+    && git config --global --add safe.directory /workspace/main \
+    && git config --global --add safe.directory /workspace/agent1 \
+    && git config --global --add safe.directory /workspace/agent2 \
+    && git config --global --add safe.directory /workspace/agent3 \
+    && git config --global --add safe.directory /workspace/agent4 \
+    && git config --global --add safe.directory '*'
 
 # Create workspace directory
 WORKDIR /workspace/main
