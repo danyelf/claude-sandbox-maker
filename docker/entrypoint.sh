@@ -32,6 +32,39 @@ setup_status_dir() {
     log "Status directory: $AGENT_STATUS_DIR"
 }
 
+# Write agent status for dashboard polling
+# Usage: write_status <status> [task_id]
+# Status values: idle, working, needs_approval, blocked
+write_status() {
+    local status="$1"
+    local task_id="${2:-}"
+
+    echo "$status" > "$AGENT_STATUS_DIR/status"
+
+    if [ -n "$task_id" ]; then
+        echo "$task_id" > "$AGENT_STATUS_DIR/task"
+    fi
+}
+
+# Write output to both stderr (logs) and output.log (dashboard)
+# Usage: tee_output <message>
+tee_output() {
+    local message="$1"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Write to stderr with full log format
+    echo "[$timestamp] [$AGENT_ID] $message" >&2
+
+    # Append to output.log for dashboard (without timestamp for cleaner display)
+    echo "$message" >> "$AGENT_STATUS_DIR/output.log"
+}
+
+# Clear the output log (call when starting new task)
+clear_output_log() {
+    : > "$AGENT_STATUS_DIR/output.log"
+}
+
 # Get list of conflicting files during a failed rebase/merge
 get_conflict_files() {
     git diff --name-only --diff-filter=U 2>/dev/null | tr '\n' ', ' | sed 's/,$//'
