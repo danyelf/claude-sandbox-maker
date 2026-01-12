@@ -2,7 +2,7 @@
 
 **Issue:** csb-kva - Add interactive mode support
 **Date:** 2026-01-11
-**Status:** Draft
+**Status:** Ready for implementation
 
 ## Overview
 
@@ -189,7 +189,7 @@ csb start agent1 agent2 --mode interactive
 
 ### Phase 2: Basic Dashboard
 
-1. Create dashboard script using bash + tput (or Python curses)
+1. Create dashboard using Python + Textual
 2. Poll agent status from shared state files
 3. Display agent panels and task bar
 4. Implement keyboard navigation
@@ -235,13 +235,24 @@ Agents communicate status via shared files in `/workspace/.csb/`:
 └── tasks.json          # cached bd list output
 ```
 
-## Open Questions
+## Technology Decisions
 
-1. **Dashboard implementation:** Bash+tput is simple but limited. Python curses gives more control. Rich library would be prettiest. Which to use?
+1. **Dashboard implementation:** Python + Textual
+   - Full TUI framework built on Rich
+   - Handles live updates, keyboard navigation, and panel layouts well
+   - Trade-off: external dependency, but well-maintained and purpose-built for this
 
-2. **Focus mode session management:** tmux is the obvious choice, but need to handle the dashboard process itself. Run dashboard in its own tmux pane?
+2. **Focus mode session management:** tmux
+   - Each agent runs in its own tmux session
+   - Dashboard runs in a separate tmux window
+   - Focus = `tmux attach-session -t agentN`
+   - Detach (`Ctrl+B d`) returns to dashboard
+   - Battle-tested, maps perfectly to focus/return model
 
-3. **Agent output streaming:** How much output to show? Buffer last N lines? Timestamp entries?
+3. **Agent output streaming:** Last N lines, no timestamps
+   - Simple tail of recent output (3-4 lines per panel)
+   - Start simple, add timestamps later if needed
+   - YAGNI: avoid complexity until proven necessary
 
 ## Success Criteria
 
