@@ -1,137 +1,123 @@
-# CSB (Claude SandBox)
+# Multi-Agent Docker Infrastructure
 
-A CLI tool that creates isolated Linux virtual machines for safely running [Claude Code](https://claude.ai/code) in a sandboxed environment.
+Run multiple Claude Code agents in Docker containers, coordinated via [beads](https://github.com/steveyegge/beads) issue tracking.
 
-## Why?
+## How It Works
 
-Run Claude Code with peace of mind:
-
-- **Isolated environment** - Claude operates in a VM, not on your host system
-- **Network security** - Outbound traffic blocked by default, with allowlist for essential services (npm, PyPI, GitHub, Anthropic APIs)
-- **Easy cleanup** - Destroy the VM when done, leaving no trace
-
-## Requirements
-
-- macOS with [Lima](https://lima-vm.io/) installed
-- An Anthropic API key
-
-```bash
-brew install lima
-```
-
-## Installation
-
-### System Install (Recommended)
-
-```bash
-git clone https://github.com/danyelf/claude-sandbox-maker.git
-cd claude-sandbox-maker
-./install.sh
-```
-
-This installs:
-- `/usr/local/bin/csb` - the CLI
-- `/usr/local/share/csb/` - support files (template, config)
-
-To uninstall: `./install.sh --uninstall`
-
-### Development Install
-
-For hacking on csb itself, add the repo to your PATH:
-
-```bash
-git clone https://github.com/danyelf/claude-sandbox-maker.git
-export PATH="$PATH:$(pwd)/claude-sandbox-maker/csb"
-```
+1. **Init service** clones your repo into a shared Docker volume
+2. **Agent containers** run Claude Code in autonomous loops
+3. Each agent claims tasks from beads, works in isolated git worktrees
+4. Completed work is rebased, tested, and pushed to main
+5. Failed tasks are marked blocked with detailed comments
 
 ## Quick Start
 
 ```bash
-# Navigate to your project
-cd ~/my-project
+cd docker
 
-# Start Claude in the sandbox
-csb start
+# Set up environment
+cp .env.example .env
+# Edit .env with your tokens:
+#   GITHUB_TOKEN=ghp_xxx
+#   CLAUDE_OAUTH_TOKEN=sk-ant-xxx
+#   GIT_REPO_URL=https://github.com/owner/repo.git
 
-# Attach to the Claude session
-csb attach
+# Initialize workspace (clone repo)
+docker compose up init
+
+# Run a single agent
+docker compose up agent1
+
+# Run all 4 agents
+docker compose up
 ```
 
-Your project directory is mounted at `/workspace` inside the VM.
+## Environment Variables
 
-## Parallel Agents
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_TOKEN` | GitHub PAT for repo access and pushing |
+| `CLAUDE_OAUTH_TOKEN` | Claude Code OAuth token |
+| `GIT_REPO_URL` | Repository to work on |
+| `AGENT_MODE` | `autonomous` (default) or `interactive` |
 
-Run multiple isolated Claude agents in parallel, each with its own user and repo clone:
+## Services
+
+- **init** - Clones repo into shared workspace volume
+- **agent1-4** - Autonomous Claude Code agents
+- **interactive** - Shell access with port mapping for dev servers
+
+## Interactive Mode
+
+For hands-on work with dev server access:
 
 ```bash
-# Set GitHub token for git authentication
-export GITHUB_TOKEN="ghp_..."
-
-# Start isolated agents (each gets own Linux user)
-csb start agent1
-csb start agent2
-csb start agent3
-
-# List all sessions
-csb list
-
-# Attach to a specific agent
-csb attach agent1
+docker compose --profile interactive run --service-ports interactive
 ```
 
-**Key features:**
-- Each agent runs as a separate Linux user (`agent1`, `agent2`, etc.)
-- Home directories are `chmod 700` - agents cannot see each other's files
-- Git repo is cloned to `~/repo` for each agent (synced on start)
-- Kernel-enforced isolation (not just instruction-following)
+Mapped ports:
+- 5181 → 5173 (Vite)
+- 3000 → 3000 (Node)
+- 8080 → 8080 (API)
 
-## Commands
+## Agent Workflow
 
-| Command | Description |
-|---------|-------------|
-| `csb start` | Create a new shared Claude session in /workspace |
-| `csb start <agent>` | Create an isolated agent with own user and repo clone |
-| `csb attach [n]` | Attach to session n (default: most recent) |
-| `csb attach <agent>` | Attach to an agent's session |
-| `csb shell` | Open a bash shell in the VM |
-| `csb list` | Show VM status and active sessions |
-| `csb status` | Show VM state and configuration |
-| `csb config` | Show how to adjust VM resources |
-| `csb stop` | Shut down the VM |
-| `csb destroy` | Permanently delete the VM |
+Each autonomous agent runs this loop:
 
-## How It Works
+1. `bd ready` - Find available tasks
+2. Claim task with `bd update --status in_progress`
+3. Create git worktree on fresh branch from main
+4. Run Claude Code with task prompt
+5. Rebase onto latest main
+6. Run tests (if present)
+7. Fast-forward merge to main
+8. Push (with retries)
+9. Close task or mark blocked with failure details
+10. Clean up worktree, repeat
 
-1. **VM Creation**: On first run, csb creates a Debian 12 VM using Lima
-2. **Provisioning**: Installs Node.js, Python, git, and Claude Code
-3. **Network Rules**: Applies iptables rules blocking all outbound traffic except:
-   - Package registries (npm, PyPI, Debian)
-   - GitHub (for cloning repos)
-   - Anthropic APIs (for Claude)
-   - DNS and NTP
-4. **Session Management**: Runs Claude Code in tmux sessions for easy attach/detach
+## Failure Handling
 
-## Configuration
+When agents fail, they:
+- Abort any partial git operations
+- Add detailed comment explaining the failure
+- Mark the task as blocked
+- Move on to next available task
 
-VM resources can be adjusted via Lima:
+Failure types tracked:
+- `claude_failed` - Claude couldn't complete the task
+- `merge_conflict` - Conflicts during rebase
+- `test_failure` - Tests failed after rebase
+- `push_failed` - Couldn't push after retries
 
-```bash
-limactl edit <vm-name>
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│              Docker Host                     │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐       │
+│  │ agent1  │ │ agent2  │ │ agent3  │  ...  │
+│  └────┬────┘ └────┬────┘ └────┬────┘       │
+│       │           │           │             │
+│       └───────────┼───────────┘             │
+│                   ▼                         │
+│         ┌─────────────────┐                 │
+│         │ workspace volume │                 │
+│         │  /workspace/main │ ← shared repo  │
+│         │  /workspace/agent1│ ← worktrees   │
+│         │  /workspace/agent2│               │
+│         └─────────────────┘                 │
+└─────────────────────────────────────────────┘
+                    │
+                    ▼
+            GitHub (origin)
 ```
 
-Run `csb config` to see the VM name and instructions.
+## Requirements
 
-Default: 4 CPUs, 4GiB memory, 30GiB disk
-
-## Debugging
-
-Enable verbose output:
-
-```bash
-csb --verbose start
-# or
-CSB_VERBOSE=true csb start
-```
+- Docker with Compose v2
+- GitHub repo with beads initialized (`bd init`)
+- Valid Claude Code OAuth token
+- GitHub PAT with repo access
 
 ## License
 

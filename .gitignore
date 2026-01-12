@@ -1,5 +1,6 @@
 .worktrees/
 .csb
 .env
+docker/.env
 .beads/.sync.lock
 .beads/sync_base.jsonl
