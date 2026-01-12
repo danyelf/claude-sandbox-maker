@@ -242,26 +242,46 @@ do_work() {
     task_title=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].title // "Unknown task"')
     task_desc=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].description // ""')
 
-    log "Starting work on: $task_title"
+    # Clear output log and update status for dashboard
+    clear_output_log
+    write_status "working" "$task_id"
+    tee_output "Starting work on: $task_title"
 
-    # Run Claude Code in non-interactive mode
-    local prompt="You are working on task $task_id: $task_title
+    # Build the prompt based on mode
+    local prompt
+    if [ "$AGENT_MODE" = "interactive" ]; then
+        # In interactive mode, stop before merging so human can review/approve
+        prompt="You are working on task $task_id: $task_title
+
+$task_desc
+
+Complete this task. When done:
+1. Commit your changes with a descriptive message
+2. STOP - do not merge or push
+
+Wait for approval before proceeding with merge. The human will review your changes and either approve or request changes via 'claude --continue'."
+    else
+        # Autonomous mode - complete the full task
+        prompt="You are working on task $task_id: $task_title
 
 $task_desc
 
 Complete this task. When done, commit your changes with a descriptive message.
 Do not push - that will be handled separately.
 If you cannot complete the task, explain why in a comment."
+    fi
 
-    # Execute Claude Code
-    if claude --dangerously-skip-permissions -p "$prompt" 2>&1; then
-        log "Claude completed work on $task_id"
+    # Execute Claude Code with output captured for dashboard
+    local exit_code=0
+    if claude --dangerously-skip-permissions -p "$prompt" 2>&1 | tee -a "$AGENT_STATUS_DIR/output.log"; then
+        tee_output "Claude completed work on $task_id"
         return 0
     else
-        error "Claude failed on $task_id"
+        exit_code=$?
+        tee_output "ERROR: Claude failed on $task_id"
         FAILURE_REASON="claude_failed"
         FAILURE_DETAILS="Claude Code failed to complete the task. This may require manual intervention or the task may need to be broken down into smaller pieces."
-        return 1
+        return $exit_code
     fi
 }
 
