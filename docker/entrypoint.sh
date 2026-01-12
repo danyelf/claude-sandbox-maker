@@ -65,6 +65,62 @@ clear_output_log() {
     : > "$AGENT_STATUS_DIR/output.log"
 }
 
+# Write approval request for dashboard to display
+# Creates approval/ directory with type, diff, and message files
+# Usage: write_approval_request <task_type>
+write_approval_request() {
+    local task_type="$1"
+    local approval_dir="$AGENT_STATUS_DIR/approval"
+
+    mkdir -p "$approval_dir"
+
+    # Write task type
+    echo "$task_type" > "$approval_dir/type"
+
+    # Write git diff (staged and unstaged changes compared to origin/main)
+    git diff origin/main...HEAD > "$approval_dir/diff" 2>/dev/null || true
+
+    # Write commit message (most recent commit on this branch)
+    git log -1 --format='%s%n%n%b' > "$approval_dir/message" 2>/dev/null || true
+
+    log "Approval request written to $approval_dir"
+}
+
+# Wait for approval response from dashboard
+# Polls for response file and returns its contents
+# Usage: wait_for_approval
+# Returns: "approved" or "rejected" (or empty if timeout/error)
+wait_for_approval() {
+    local approval_dir="$AGENT_STATUS_DIR/approval"
+    local response_file="$approval_dir/response"
+    local poll_interval=2
+
+    log "Waiting for approval..."
+
+    while true; do
+        if [ -f "$response_file" ]; then
+            local response
+            response=$(cat "$response_file")
+            log "Received approval response: $response"
+            echo "$response"
+            return 0
+        fi
+
+        sleep "$poll_interval"
+    done
+}
+
+# Clear approval request files after processing
+# Usage: clear_approval_request
+clear_approval_request() {
+    local approval_dir="$AGENT_STATUS_DIR/approval"
+
+    if [ -d "$approval_dir" ]; then
+        rm -rf "$approval_dir"
+        log "Cleared approval request"
+    fi
+}
+
 # Get the task type from beads
 # Usage: get_task_type <task_id>
 # Returns: feature, bug, chore, refactor, task, epic, etc.
